@@ -13,9 +13,12 @@ import { polylineLength, toPoint, type Point } from '../physics/geometry';
 import { rebuild, Simulation, type CrashReason, type SimEvent } from '../physics/Simulation';
 import { addSample, clipToLength } from '../physics/StrokeBuilder';
 import { Button } from '../render/Button';
-import { Effects, starPoints } from '../render/Effects';
+import { Effects } from '../render/Effects';
+import { addLevelArt, addNails, addScribbleUnderline } from '../render/LevelArt';
 import { addPaper } from '../render/PaperBackground';
 import { RENDER_SCALE, setupCamera } from '../render/scale';
+import { boilFrame, boilImage, css, PENCIL, registerBoil, roughTextures, roundedRectPath, starPath } from '../render/RoughRenderer';
+import { mulberry32 } from '../endless/SeededRandom';
 import { VehicleRenderer } from '../render/VehicleRenderer';
 
 const CRASH_TEXT: Record<CrashReason, string> = {
@@ -41,7 +44,6 @@ export class GameScene extends Phaser.Scene {
   private drawPointerId: number | null = null;
   private lastSample: { x: number; y: number; t: number } | null = null;
 
-  private worldG!: Phaser.GameObjects.Graphics;
   private strokeG!: Phaser.GameObjects.Graphics;
   private car!: VehicleRenderer;
   private fx!: Effects;
@@ -50,7 +52,11 @@ export class GameScene extends Phaser.Scene {
   private message!: Phaser.GameObjects.Text;
   private subMessage!: Phaser.GameObjects.Text;
   private details!: Phaser.GameObjects.Text;
-  private stars: Phaser.GameObjects.Graphics[] = [];
+  private stars: Phaser.GameObjects.Image[] = [];
+  private timerText!: Phaser.GameObjects.Text;
+  private pauseBtn!: Button;
+  private pauseLayer!: Phaser.GameObjects.Container;
+  private paused = false;
   private undoBtn!: Button;
   private clearBtn!: Button;
   private goBtn!: Button;
@@ -72,16 +78,21 @@ export class GameScene extends Phaser.Scene {
     this.fails = 0;
 
     addPaper(this, GAME_WIDTH, GAME_HEIGHT);
-    this.worldG = this.add.graphics();
+    addLevelArt(this, this.level);
+    addNails(this, this.sim.anchors);
     this.strokeG = this.add.graphics().setDepth(2);
     this.car = new VehicleRenderer(this, 5);
     this.fx = new Effects(this, 15);
     this.hudG = this.add.graphics().setDepth(25);
 
-    this.add
+    const title = this.add
       .text(GAME_WIDTH / 2, 34, this.level.name, { fontFamily: FONT_TITLE, fontSize: '30px', color: '#3d3d44' })
       .setOrigin(0.5)
-      .setResolution(RENDER_SCALE);
+      .setResolution(RENDER_SCALE)
+      .setDepth(10);
+    addScribbleUnderline(this, GAME_WIDTH / 2, 58, Math.round(title.width + 16));
+    this.timerText = this.text(GAME_WIDTH / 2, 82, '', 22).setDepth(10);
+    this.addInkBarFrame();
     this.inkText = this.text(HUD.inkBar.x + HUD.inkBar.w / 2, HUD.inkBar.y - 22, 'ink', 20).setDepth(10);
     this.message = this.add
       .text(GAME_WIDTH / 2, 230, '', { fontFamily: FONT_TITLE, fontSize: '56px', color: '#3d3d44' })
@@ -100,6 +111,13 @@ export class GameScene extends Phaser.Scene {
       fill: 0xfff1a8,
       fontSize: 30,
     }).setDepth(30);
+    this.pauseBtn = new Button(this, GAME_WIDTH - HUD.margin - 24, 36, 'II', () => this.setPaused(true), {
+      width: 48,
+      height: 48,
+      radius: 24,
+      fontSize: 22,
+    }).setDepth(30);
+    this.pauseLayer = this.buildPauseLayer();
     this.boostBtn = new Button(this, GAME_WIDTH - HUD.margin - 44, by - 14, 'Boost', () => this.boost(), {
       width: 84,
       height: 84,
@@ -114,8 +132,56 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerupoutside', this.onPointerUp, this);
     this.events.once('shutdown', () => Sfx.quiet());
 
-    this.drawWorld();
     this.refreshUi();
+  }
+
+  private addInkBarFrame(): void {
+    const b = HUD.inkBar;
+    const keys = roughTextures(this, 'inkbar', { x: b.x, y: b.y, w: b.w, h: b.h }, (rc, _ctx, seed) => {
+      rc.path(roundedRectPath(b.x, b.y, b.w, b.h, 7), { ...PENCIL, strokeWidth: 2.4, seed });
+      for (let i = 1; i < 4; i++) {
+        const y = b.y + (b.h * i) / 4;
+        rc.line(b.x + b.w - 5, y, b.x + b.w, y, { ...PENCIL, strokeWidth: 1.4, seed: seed + i });
+      }
+    });
+    boilImage(this, keys, { x: b.x, y: b.y, w: b.w, h: b.h }).setDepth(26);
+  }
+
+  private buildPauseLayer(): Phaser.GameObjects.Container {
+    const dim = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH + 4000, GAME_HEIGHT + 4000, 0x2a2420, 0.35);
+    dim.setInteractive();
+    const panel = { x: GAME_WIDTH / 2 - 150, y: 250, w: 300, h: 250 };
+    const keys = roughTextures(this, 'pause-panel', panel, (rc, ctx, seed) => {
+      const outline = roundedRectPath(panel.x, panel.y, panel.w, panel.h, 18);
+      ctx.fillStyle = css(0xfbf7ea);
+      ctx.fill(new Path2D(outline));
+      rc.path(outline, { ...PENCIL, strokeWidth: 2.8, seed });
+    });
+    const img = boilImage(this, keys, panel);
+    const title = this.add
+      .text(GAME_WIDTH / 2, 300, 'Paused', { fontFamily: FONT_TITLE, fontSize: '40px', color: '#3d3d44' })
+      .setOrigin(0.5)
+      .setResolution(RENDER_SCALE);
+    const resume = new Button(this, GAME_WIDTH / 2, 380, 'Resume', () => this.setPaused(false), {
+      width: 180,
+      fill: 0xfff1a8,
+    });
+    const restart = new Button(this, GAME_WIDTH / 2, 448, 'Restart', () => {
+      this.setPaused(false);
+      this.retry();
+    }, { width: 180 });
+    return this.add.container(0, 0, [dim, img, title, resume, restart]).setDepth(50).setVisible(false);
+  }
+
+  private setPaused(on: boolean): void {
+    this.paused = on;
+    this.pauseLayer.setVisible(on);
+    this.pauseBtn.setVisible(!on);
+    if (on) {
+      Sfx.quiet();
+      if (this.raw) this.commitStroke();
+    }
+    Sfx.tap();
   }
 
   private text(x: number, y: number, s: string, size: number): Phaser.GameObjects.Text {
@@ -129,7 +195,7 @@ export class GameScene extends Phaser.Scene {
 
   private onPointerDown(pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
     Sfx.unlock();
-    if (over.length > 0) return;
+    if (over.length > 0 || this.paused) return;
     if (this.sim.status === 'running') {
       // While running, a tap anywhere boosts.
       this.boost();
@@ -248,6 +314,7 @@ export class GameScene extends Phaser.Scene {
   // ---------- loop ----------
 
   update(time: number, delta: number): void {
+    if (this.paused) return;
     const frozen = time < this.hitStopUntil;
     if (!frozen && this.pendingCrash) {
       this.showCrash(this.pendingCrash);
@@ -258,8 +325,9 @@ export class GameScene extends Phaser.Scene {
     if (!frozen) this.car.update(this.sim.vehicle, this.sim.status, time, delta, this.sim.boosting);
     this.fx.update(frozen ? 0 : delta);
     Sfx.setCreak(this.sim.status === 'running' ? maxStress(this.sim.strokes) : 0);
-    this.drawStrokes();
+    this.drawStrokes(time);
     this.drawHud();
+    this.timerText.setText(this.sim.status === 'drawing' ? '' : `${(this.sim.elapsedMs / 1000).toFixed(1)} s`);
   }
 
   private stepSim(delta: number): void {
@@ -340,17 +408,34 @@ export class GameScene extends Phaser.Scene {
       this.level.stars,
     );
     const earned = [rating.complete, rating.ink, rating.time];
+    const starKeys = (on: boolean) =>
+      roughTextures(this, on ? 'star-on' : 'star-off', { x: -30, y: -30, w: 60, h: 60 }, (rc, ctx, seed) => {
+        const pts = starPath(0, 0, 28);
+        ctx.beginPath();
+        pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+        ctx.fillStyle = on ? css(COLOURS.star) : 'rgba(255,255,255,0.7)';
+        ctx.fill();
+        rc.polygon(pts, {
+          ...PENCIL,
+          stroke: on ? '#3d3d44' : '#8a8790',
+          strokeWidth: 2.6,
+          fill: on ? 'rgba(214,150,20,0.8)' : undefined,
+          fillStyle: 'hachure',
+          hachureGap: 4,
+          seed,
+        });
+      });
     earned.forEach((on, i) => {
-      const g = this.add.graphics().setDepth(21).setPosition(GAME_WIDTH / 2 + (i - 1) * 70, 330);
-      const pts = starPoints(0, 0, 28);
-      g.fillStyle(on ? COLOURS.star : 0xffffff, on ? 1 : 0.6);
-      g.fillPoints(pts, true);
-      g.lineStyle(3, on ? COLOURS.graphite : COLOURS.graphiteLight, 1);
-      g.strokePoints(pts, true);
-      g.setScale(0);
-      this.stars.push(g);
+      const keys = starKeys(on);
+      const img = this.add
+        .image(GAME_WIDTH / 2 + (i - 1) * 70, 330, keys[0]!)
+        .setDepth(21)
+        .setScale(0);
+      registerBoil(this, img, keys);
+      this.stars.push(img);
       this.time.delayedCall(450 + i * 300, () => {
-        this.tweens.add({ targets: g, scale: 1, angle: on ? 360 : 0, duration: 380, ease: 'Back.easeOut' });
+        this.tweens.add({ targets: img, scale: 1 / RENDER_SCALE, angle: on ? 360 : 0, duration: 380, ease: 'Back.easeOut' });
         if (on) Sfx.ding(i);
         else Sfx.tap();
       });
@@ -389,53 +474,27 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- rendering ----------
 
-  private drawWorld(): void {
-    const g = this.worldG;
-    g.clear();
-    for (const t of this.level.terrain) {
-      const pts = t.points.map(toPoint);
-      g.fillStyle(COLOURS.terrainFill, 1);
-      g.fillPoints(pts, true);
-      g.lineStyle(3, COLOURS.graphite, 1);
-      g.strokePoints(pts, true);
-    }
-    const f = this.level.flag;
-    const poleX = f.x + f.w / 2;
-    const groundY = f.y + f.h;
-    g.lineStyle(3, COLOURS.graphite, 1);
-    g.lineBetween(poleX, groundY, poleX, groundY - 70);
-    g.fillStyle(COLOURS.danger, 1);
-    g.fillTriangle(poleX, groundY - 70, poleX + 34, groundY - 60, poleX, groundY - 50);
-    g.strokeTriangle(poleX, groundY - 70, poleX + 34, groundY - 60, poleX, groundY - 50);
-  }
-
-  private drawStrokes(): void {
+  private drawStrokes(time: number): void {
     const g = this.strokeG;
     g.clear();
     const pen = this.sim.pen;
+    const frame = boilFrame(time);
 
     if (this.sim.status === 'drawing' && this.fails >= HUD.hintAfterFails && this.level.hint) {
       for (const hint of this.level.hint) dashed(g, hint.map(toPoint), COLOURS.hint, 4);
     }
 
     for (const chain of this.sim.strokes) {
-      for (const run of chain.runs()) stressedLine(g, run.points, run.stress, pen.thickness, pen.colour);
+      chain.runs().forEach((run, r) =>
+        stressedLine(g, run.points, run.stress, pen.thickness, pen.colour, chain.id * 97 + r * 13 + frame),
+      );
     }
 
     if (this.raw) {
       const live = this.livePointer();
       const pts = live ? [...this.raw, live] : this.raw;
       const clipped = clipToLength(pts, this.sim.inkLeft);
-      stressedLine(g, clipped, clipped.map(() => 0), pen.thickness, pen.colour);
-    }
-
-    // Nails on top of the lines.
-    for (const a of this.sim.anchors) {
-      g.fillStyle(0xb7b3ab, 1);
-      g.fillCircle(a.x, a.y, 7);
-      g.lineStyle(2.5, COLOURS.graphite, 1);
-      g.strokeCircle(a.x, a.y, 7);
-      g.lineBetween(a.x - 3, a.y - 3, a.x + 3, a.y + 3);
+      stressedLine(g, clipped, clipped.map(() => 0), pen.thickness, pen.colour, 999 + frame);
     }
   }
 
@@ -453,8 +512,6 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(frac < 0.2 ? COLOURS.danger : COLOURS.ink, 1);
       g.fillRoundedRect(b.x, b.y + b.h - h, b.w, h, 8);
     }
-    g.lineStyle(2.5, COLOURS.graphite, 1);
-    g.strokeRoundedRect(b.x, b.y, b.w, b.h, 8);
 
     // Boost cooldown ring: fills back up clockwise until the next boost is ready.
     if (this.boostBtn.visible) {
@@ -481,6 +538,7 @@ function stressedLine(
   stress: readonly number[],
   width: number,
   colour: number,
+  seed: number,
 ): void {
   if (pts.length < 2) return;
   const tint = (s: number) => Math.max(0, Math.min(1, (s - BREAKING.tintFrom) / (1 - BREAKING.tintFrom)));
@@ -496,10 +554,19 @@ function stressedLine(
     g.fillCircle(b.x, b.y, w / 2);
     if (i === 1) g.fillCircle(a.x, a.y, w / 2);
   }
-  // A faint highlight down the middle gives the pencil some sheen.
-  g.lineStyle(Math.max(1, width * 0.3), 0xffffff, 0.16);
+  // Pencil texture: a second, wobbly sketch pass along the edges, and a faint sheen.
+  const rand = mulberry32(seed);
+  const jitter = () => (rand() - 0.5) * width * 0.5;
+  for (const side of [-1, 1]) {
+    g.lineStyle(1.2, 0x1f1f24, 0.35);
+    g.strokePoints(
+      pts.map((p) => ({ x: p.x + jitter(), y: p.y + side * width * 0.42 + jitter() })),
+      false,
+    );
+  }
+  g.lineStyle(Math.max(1, width * 0.25), 0xffffff, 0.18);
   g.strokePoints(
-    pts.map((p) => ({ x: p.x, y: p.y - width * 0.18 })),
+    pts.map((p) => ({ x: p.x, y: p.y - width * 0.15 })),
     false,
   );
 }

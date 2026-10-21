@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { PAPER } from '../config/world';
+import { DESK, PAPER } from '../config/world';
 import { mulberry32 } from '../endless/SeededRandom';
 import { RENDER_SCALE } from './scale';
 
@@ -43,7 +43,49 @@ export function createPaperTexture(scene: Phaser.Scene, key: string, width: numb
   tex.refresh();
 }
 
+/** The desk around the page: warm wood with faint grain, baked into a tile so it costs nothing per frame. */
+function addDesk(scene: Phaser.Scene, width: number, height: number): void {
+  const key = 'desk-tile';
+  const size = 256;
+  if (!scene.textures.exists(key)) {
+    const tex = scene.textures.createCanvas(key, size, size);
+    if (tex) {
+      const ctx = tex.getContext();
+      ctx.fillStyle = hex(DESK.colour);
+      ctx.fillRect(0, 0, size, size);
+      const rand = mulberry32(42);
+      ctx.strokeStyle = hex(DESK.grain);
+      for (let i = 0; i < 26; i++) {
+        const y = rand() * size;
+        ctx.globalAlpha = 0.2 + rand() * 0.25;
+        ctx.lineWidth = 1 + rand() * 2;
+        ctx.beginPath();
+        // Lines wrap around so the tile repeats seamlessly.
+        ctx.moveTo(-10, y);
+        ctx.bezierCurveTo(size * 0.3, y + (rand() - 0.5) * 6, size * 0.7, y + (rand() - 0.5) * 6, size + 10, y);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      tex.refresh();
+    }
+  }
+  const margin = 1600;
+  scene.add
+    .tileSprite(-margin, -margin, width + margin * 2, height + margin * 2, key)
+    .setOrigin(0)
+    .setDepth(-120);
+  // Soft shadow along the page's right and bottom edges (thin strips, so almost no overdraw).
+  const shadow = scene.add.graphics().setDepth(-110);
+  for (let i = 1; i <= 4; i++) {
+    shadow.fillStyle(0x000000, 0.07);
+    shadow.fillRect(width, i, i + 1, height);
+    shadow.fillRect(i, height, width, i + 1);
+  }
+}
+
+/** The notebook page (lined paper) on the desk. */
 export function addPaper(scene: Phaser.Scene, width: number, height: number): Phaser.GameObjects.Image {
+  addDesk(scene, width, height);
   const key = `paper-${width}x${height}`;
   createPaperTexture(scene, key, width, height);
   return scene.add.image(0, 0, key).setOrigin(0).setScale(1 / RENDER_SCALE).setDepth(-100);

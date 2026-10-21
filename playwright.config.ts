@@ -7,6 +7,8 @@ export default defineConfig({
     ...devices['iPhone 13'],
     browserName: 'chromium',
     viewport: { width: 390, height: 844 },
+    // 1x keeps the software-rendered test browser fast; phones render at up to 2x.
+    deviceScaleFactor: 1,
     baseURL: process.env.BASE_URL ?? 'http://localhost:4173',
   },
   // Set BASE_URL to test a running server (for example a local `wrangler dev` of the deploy worker).

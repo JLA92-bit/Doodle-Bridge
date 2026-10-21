@@ -33,6 +33,12 @@ export const BOOST = {
   cooldownMs: 1500,
 };
 
+/** The desk the notebook page lies on, visible around the page on tall or wide screens. */
+export const DESK = {
+  colour: 0x8b6b52,
+  grain: 0x6f523d,
+};
+
 export const PAPER = {
   colour: 0xfbf7ea,
   lineColour: 0x9cc3e6,

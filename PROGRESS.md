@@ -5,7 +5,7 @@
 - [x] 2. Drawing + physics prototype - stroke capture, RDP simplify, segment chains, nails, ink meter, undo/clear, Go, Paper Car, test level *(awaiting feel review)*
 - [x] Vehicle art pass (requested after phase 2): all 6 vehicles drawn and driveable, then restyled to polished cartoon, see below
 - [x] 3. Breaking + game feel - stress tint, snapping, debris, crash/win rules, hit-stop, shake, sounds, confetti, stars, boost *(awaiting feel review)*
-- [ ] 4. Rough art pass
+- [x] 4. Rough art pass - roughjs terrain, flag, nails, buttons, ink bar, stars and pause panel with 12 fps boil; pencil-textured lines; page on a desk filling any screen; pause button and run timer *(awaiting look review)*
 - [ ] 5. Campaign framework
 - [ ] 6. Content: 60 levels
 - [ ] 7. Endless + daily
@@ -72,5 +72,18 @@ Feel (Josh, on phone)
   - Settings (sound, haptics, reduced motion) have defaults until the settings screen in phase 10; reduced motion
     follows the phone's system setting and turns off screen shake.
 
+- Phase 4 decisions:
+  - The game is a 480 x 854 notebook page lying on a wooden desk. The canvas expands to fill any screen (Phaser
+    EXPAND) and the camera keeps the page centred, so there are no plain bars on tall or wide screens. Falling off
+    the page bottom is the "fell" crash.
+  - Boil: each rough drawing is painted in 3 versions (different roughjs seeds) and flipped at 12 fps. Cheap on phones;
+    frozen on frame 1 with reduced motion. Drawn lines wobble in step with a seeded sketch pass.
+  - Desk is a baked repeating tile and the page shadow is thin edge strips, to keep overdraw low.
+  - HUD per plan: ink bar left, level name and run timer top centre, pause top right, undo/clear (or retry while
+    running) bottom left, Go/Boost bottom right. Pause offers Resume and Restart (Levels comes with phase 5).
+  - Browser tests run at 1x pixel density to keep the software renderer fast; `window.__pageToClient` converts page
+    coordinates to screen coordinates for tests.
+
 ## Known gaps to revisit
-- On very tall phones the 480 x 854 view letterboxes top and bottom; phase 4 HUD pass will extend the paper to fill the screen.
+- Frame rate in the sandbox's software-rendered test browser is low (about 10 fps at 2x); this does not reflect phones.
+  The phase 10 performance pass checks a real mid-range phone.

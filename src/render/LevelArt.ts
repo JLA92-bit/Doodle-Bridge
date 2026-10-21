@@ -1,0 +1,88 @@
+import type Phaser from 'phaser';
+import { COLOURS } from '../config/ui';
+import type { LevelData } from '../game/Level';
+import { boilImage, css, INK, PENCIL, roughTextures, type Box } from './RoughRenderer';
+
+const TERRAIN_HATCH = 'rgba(70,70,80,0.5)';
+
+function boundsOf(points: [number, number][]): Box {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/**
+ * The static drawing of a level (terrain shaded with pencil hatching and the flag),
+ * baked into boiling textures. Returns the image so the scene can layer it.
+ */
+export function addLevelArt(scene: Phaser.Scene, level: LevelData): Phaser.GameObjects.Image {
+  const f = level.flag;
+  const poleX = f.x + f.w / 2;
+  const groundY = f.y + f.h;
+  const all: [number, number][] = [
+    ...level.terrain.flatMap((t) => t.points),
+    [poleX - 4, groundY - 76],
+    [poleX + 40, groundY],
+  ];
+  const box = boundsOf(all);
+  const keys = roughTextures(scene, `level-${level.id}`, box, (rc, ctx, seed) => {
+    for (const t of level.terrain) {
+      // Solid paper-grey underlay, then pencil hatching and a sketchy outline.
+      ctx.beginPath();
+      t.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = css(COLOURS.terrainFill, 0.85);
+      ctx.fill();
+      rc.polygon(t.points, {
+        ...PENCIL,
+        strokeWidth: 2.6,
+        fill: TERRAIN_HATCH,
+        fillStyle: 'hachure',
+        hachureGap: 7,
+        hachureAngle: -41,
+        fillWeight: 1.1,
+        seed,
+      });
+    }
+    // Flag: pole and a crayon-filled pennant.
+    rc.line(poleX, groundY, poleX, groundY - 72, { ...PENCIL, strokeWidth: 3, seed });
+    rc.polygon(
+      [
+        [poleX, groundY - 72],
+        [poleX + 36, groundY - 61],
+        [poleX, groundY - 50],
+      ],
+      { ...PENCIL, fill: css(COLOURS.danger), fillStyle: 'zigzag', hachureGap: 3.5, fillWeight: 2, seed: seed + 1 },
+    );
+    rc.circle(poleX, groundY - 74, 6, { ...PENCIL, fill: css(COLOURS.star), fillStyle: 'solid', seed: seed + 2 });
+  });
+  return boilImage(scene, keys, box).setDepth(1);
+}
+
+/** Nails as small boiling doodles, drawn above the lines they pin. */
+export function addNails(scene: Phaser.Scene, nails: readonly { x: number; y: number }[]): Phaser.GameObjects.Image[] {
+  const keys = roughTextures(scene, 'nail', { x: -9, y: -9, w: 18, h: 18 }, (rc, _ctx, seed) => {
+    rc.circle(0, 0, 15, { ...PENCIL, fill: '#c9c4ba', fillStyle: 'solid', seed });
+    rc.line(-3.5, -3.5, 3.5, 3.5, { ...PENCIL, strokeWidth: 1.8, seed: seed + 3 });
+  });
+  return nails.map((n) => boilImage(scene, keys, { x: n.x - 9, y: n.y - 9, w: 18, h: 18 }).setDepth(3));
+}
+
+/** A scribbled underline under a title. */
+export function addScribbleUnderline(scene: Phaser.Scene, cx: number, y: number, width: number): Phaser.GameObjects.Image {
+  const box = { x: cx - width / 2, y: y - 6, w: width, h: 12 };
+  const keys = roughTextures(scene, `underline-${width}`, box, (rc, _ctx, seed) => {
+    rc.curve(
+      [
+        [box.x, y + 1],
+        [box.x + width * 0.3, y - 2],
+        [box.x + width * 0.7, y + 2],
+        [box.x + width, y - 1],
+      ],
+      { stroke: INK, strokeWidth: 2, roughness: 1.4, seed },
+    );
+  });
+  return boilImage(scene, keys, box).setDepth(10);
+}
