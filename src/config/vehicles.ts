@@ -25,6 +25,13 @@ export interface VehicleConfig {
   axleDamping: number;
   /** Optional self-righting strength (the unicycle rider balancing), per step. 0 = none. */
   balance: number;
+  /** Boost: wheel speed multiplier and a forward push (acceleration per step, scaled by mass) while boosting. */
+  boostSpeed: number;
+  boostForce: number;
+  /** Boost length multiplier (Rocket Car has a longer boost). */
+  boostLength: number;
+  /** Tilt (radians) beyond which the vehicle counts as flipped. */
+  maxTilt: number;
   /** Main body colour and a darker shade for details. */
   colour: number;
   shade: number;
@@ -38,6 +45,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.002, wheelFriction: 0.95,
     motorSpeed: 0.22, motorGrip: 0.12,
     axleStiffness: 0.5, axleDamping: 0.2, balance: 0,
+    boostSpeed: 1.7, boostForce: 0.0003, boostLength: 1, maxTilt: 1.9,
     colour: 0xe2574c, shade: 0xb23a32,
   },
   skateboard: {
@@ -47,6 +55,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.002, wheelFriction: 0.9,
     motorSpeed: 0.5, motorGrip: 0.15,
     axleStiffness: 0.35, axleDamping: 0.1, balance: 0,
+    boostSpeed: 1.5, boostForce: 0.0002, boostLength: 1, maxTilt: 1.9,
     colour: 0x4bb3a7, shade: 0x2c7f76,
   },
   schoolBus: {
@@ -56,6 +65,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.0025, wheelFriction: 1,
     motorSpeed: 0.19, motorGrip: 0.25,
     axleStiffness: 0.6, axleDamping: 0.25, balance: 0,
+    boostSpeed: 1.6, boostForce: 0.0004, boostLength: 1, maxTilt: 1.9,
     colour: 0xf4bf2a, shade: 0xc98f0a,
   },
   monsterTruck: {
@@ -65,6 +75,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.003, wheelFriction: 1,
     motorSpeed: 0.16, motorGrip: 0.12,
     axleStiffness: 0.35, axleDamping: 0.3, balance: 0,
+    boostSpeed: 1.6, boostForce: 0.0004, boostLength: 1, maxTilt: 1.9,
     colour: 0x3f6fd8, shade: 0x274a9c,
   },
   unicycle: {
@@ -74,6 +85,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.002, wheelFriction: 0.95,
     motorSpeed: 0.19, motorGrip: 0.12,
     axleStiffness: 0.4, axleDamping: 0.2, balance: 0.03,
+    boostSpeed: 1.5, boostForce: 0.00015, boostLength: 1, maxTilt: 1.25,
     colour: 0x9a6ad6, shade: 0x6c45a3,
   },
   rocketCar: {
@@ -83,6 +95,7 @@ export const VEHICLES: Record<VehicleId, VehicleConfig> = {
     wheelDensity: 0.002, wheelFriction: 0.95,
     motorSpeed: 0.3, motorGrip: 0.13,
     axleStiffness: 0.55, axleDamping: 0.2, balance: 0,
+    boostSpeed: 1.9, boostForce: 0.0004, boostLength: 1.5, maxTilt: 1.9,
     colour: 0x46b35a, shade: 0x2d7d3c,
   },
 };

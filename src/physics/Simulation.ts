@@ -1,9 +1,10 @@
 import Matter from 'matter-js';
-import { PHYSICS, STEP_MS } from '../config/world';
+import { BOOST, CRASH, PHYSICS, STEP_MS } from '../config/world';
 import { PENS, type PenConfig, type PenId } from '../config/pens';
 import { getVehicle, type VehicleId } from '../config/vehicles';
 import { anchorPoints, levelSize, terrainPolygons, type LevelData } from '../game/Level';
 import { BridgeChain } from './BridgeChain';
+import { updateBreaks } from './BreakSystem';
 import { CAT } from './categories';
 import { toPoint, type Point } from './geometry';
 import { buildStroke, type BuiltStroke } from './StrokeBuilder';
@@ -12,6 +13,16 @@ import { Vehicle } from './Vehicle';
 const { Body, Composite, Engine, Events, Vertices } = Matter;
 
 export type SimStatus = 'drawing' | 'running' | 'won' | 'crashed';
+export type CrashReason = 'fell' | 'flipped' | 'stalled';
+
+export type SimEvent =
+  | { type: 'snap'; at: Point }
+  | { type: 'land'; impact: number }
+  | { type: 'boost' }
+  | { type: 'won' }
+  | { type: 'crashed'; reason: CrashReason; at: Point };
+
+const stepsFor = (ms: number) => Math.round(ms / STEP_MS);
 
 /**
  * The whole game world without any rendering. The Phaser scene and the
@@ -25,9 +36,24 @@ export class Simulation {
   readonly strokes: BridgeChain[] = [];
   vehicle!: Vehicle;
   status: SimStatus = 'drawing';
+  crashReason: CrashReason | null = null;
   steps = 0;
   inkTotal: number;
+  /** Things that happened since the scene last drained them (sounds, effects). */
+  events: SimEvent[] = [];
+  /** Steps on which boosts started, for replays. */
+  readonly boosts: number[] = [];
+  snaps = 0;
   private nextStrokeId = 0;
+  private finishStep: number | null = null;
+  private boostUntil = -1;
+  private boostReadyAt = 0;
+  private scheduledBoosts = new Set<number>();
+  private flippedSteps = 0;
+  private stalledSteps = 0;
+  private progressX = -Infinity;
+  private wasGrounded = true;
+  private prevVy = 0;
 
   constructor(
     readonly level: LevelData,
@@ -115,28 +141,100 @@ export class Simulation {
     this.vehicle.motorOn = true;
   }
 
-  /** Advance one fixed physics step. Does nothing while drawing (the world is frozen). */
+  /** Tap to boost. Returns false while cooling down. */
+  boost(): boolean {
+    if (this.status !== 'running' || this.steps < this.boostReadyAt) return false;
+    this.boostUntil = this.steps + stepsFor(BOOST.durationMs * this.vehicle.config.boostLength);
+    this.boostReadyAt = this.steps + stepsFor(BOOST.cooldownMs);
+    this.boosts.push(this.steps);
+    this.events.push({ type: 'boost' });
+    return true;
+  }
+
+  /** Replays recorded boosts (solver test, replays). */
+  scheduleBoosts(steps: readonly number[]): void {
+    this.scheduledBoosts = new Set(steps);
+  }
+
+  get boosting(): boolean {
+    return this.status === 'running' && this.steps < this.boostUntil;
+  }
+
+  /** 1 right after a boost, falling to 0 when the next boost is ready. */
+  get boostCooldown(): number {
+    if (this.status !== 'running') return 0;
+    return Math.max(0, (this.boostReadyAt - this.steps) / stepsFor(BOOST.cooldownMs));
+  }
+
+  /**
+   * Advance one fixed physics step. Does nothing while drawing (the world is frozen).
+   * After a win or crash the world keeps moving (debris settles) but the clock stops.
+   */
   step(): void {
-    if (this.status !== 'running') return;
-    this.vehicle.drive();
+    if (this.status === 'drawing') return;
+    if (this.status === 'running' && this.scheduledBoosts.has(this.steps)) this.boost();
+    this.vehicle.drive(this.boosting);
     this.vehicle.wheelContacts.fill(false);
     Engine.update(this.engine, STEP_MS);
     this.steps++;
-    this.checkEnd();
+    for (const snap of updateBreaks(this.strokes)) {
+      this.snaps++;
+      this.events.push({ type: 'snap', at: snap.at });
+    }
+    if (this.status === 'running') {
+      this.checkLanding();
+      this.checkEnd();
+    }
   }
 
   get elapsedMs(): number {
-    return this.steps * STEP_MS;
+    return (this.finishStep ?? this.steps) * STEP_MS;
+  }
+
+  private checkLanding(): void {
+    const grounded = this.vehicle.grounded;
+    if (grounded && !this.wasGrounded && this.prevVy > 1.5) this.events.push({ type: 'land', impact: this.prevVy });
+    this.wasGrounded = grounded;
+    this.prevVy = this.vehicle.chassis.velocity.y;
   }
 
   private checkEnd(): void {
+    const v = this.vehicle;
     const { flag } = this.level;
-    const w = this.vehicle.frontWheel.position;
+    const w = v.frontWheel.position;
     if (w.x >= flag.x && w.x <= flag.x + flag.w && w.y >= flag.y && w.y <= flag.y + flag.h) {
-      this.status = 'won';
+      this.finish('won');
       return;
     }
-    if (this.vehicle.chassis.position.y > this.size.height + PHYSICS.fallMargin) this.status = 'crashed';
+    const lowest = Math.max(v.chassis.bounds.max.y, ...v.wheels.map((b) => b.bounds.max.y));
+    if (lowest >= this.size.height - PHYSICS.fallMargin) return this.crash('fell');
+
+    const tilt = Math.abs(Math.atan2(Math.sin(v.chassis.angle), Math.cos(v.chassis.angle)));
+    this.flippedSteps = tilt > v.config.maxTilt ? this.flippedSteps + 1 : 0;
+    if (this.flippedSteps >= stepsFor(CRASH.flippedMs)) return this.crash('flipped');
+
+    // Stalled = no forward progress (rocking back and forth in a dip counts as stuck).
+    if (v.chassis.position.x > this.progressX + CRASH.progressPx) {
+      this.progressX = v.chassis.position.x;
+      this.stalledSteps = 0;
+    } else this.stalledSteps++;
+    if (this.stalledSteps >= stepsFor(CRASH.stallMs)) return this.crash('stalled');
+  }
+
+  private finish(status: 'won' | 'crashed'): void {
+    this.status = status;
+    this.finishStep = this.steps;
+    this.vehicle.motorOn = false;
+    if (status === 'won') this.events.push({ type: 'won' });
+  }
+
+  private crash(reason: CrashReason): void {
+    this.crashReason = reason;
+    const at = { ...this.vehicle.chassis.position };
+    this.finish('crashed');
+    // The vehicle bursts into pieces (drawn by the scene), so it leaves the physics world.
+    Composite.remove(this.engine.world, this.vehicle.composite, true);
+    this.events.push({ type: 'crashed', reason, at });
   }
 
   private spawnVehicle(): void {

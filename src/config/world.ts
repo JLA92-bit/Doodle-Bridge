@@ -15,8 +15,22 @@ export const PHYSICS = {
   /** Slow motion right after Go so players can see what happens. */
   slowMoFactor: 0.5,
   slowMoMs: 500,
-  /** Bodies falling below the bottom of the screen by this much count as fallen. */
-  fallMargin: 40,
+  /** The vehicle crashes when its body gets this close to the bottom of the screen. */
+  fallMargin: 6,
+};
+
+export const CRASH = {
+  /** Upside down (or tipped past the vehicle's maxTilt) for this long = crash. */
+  flippedMs: 1500,
+  /** No forward progress for this long = stalled. */
+  stallMs: 4000,
+  /** Moving forward by at least this much (px) counts as progress. */
+  progressPx: 4,
+};
+
+export const BOOST = {
+  durationMs: 600,
+  cooldownMs: 1500,
 };
 
 export const PAPER = {

@@ -8,6 +8,8 @@ export interface ButtonOptions {
   fill?: number;
   textColour?: string;
   fontSize?: number;
+  /** Corner radius; half the height makes a pill or circle. */
+  radius?: number;
 }
 
 /** A doodled paper button. Calls onClick on release inside the button. */
@@ -64,14 +66,15 @@ export class Button extends Phaser.GameObjects.Container {
     const w = this.width;
     const h = this.height;
     const g = this.bg;
+    const r = this.opts.radius ?? 12;
     g.clear();
     g.fillStyle(0x000000, 0.12);
-    g.fillRoundedRect(-w / 2 + 3, -h / 2 + 4, w, h, 12);
+    g.fillRoundedRect(-w / 2 + 3, -h / 2 + 4, w, h, r);
     const dy = pressed ? 3 : 0;
     g.fillStyle(this.opts.fill ?? COLOURS.buttonFill, 1);
-    g.fillRoundedRect(-w / 2, -h / 2 + dy, w, h, 12);
+    g.fillRoundedRect(-w / 2, -h / 2 + dy, w, h, r);
     g.lineStyle(2.5, COLOURS.graphite, 1);
-    g.strokeRoundedRect(-w / 2, -h / 2 + dy, w, h, 12);
+    g.strokeRoundedRect(-w / 2, -h / 2 + dy, w, h, r);
     this.text.setY(1 + dy);
   }
 }

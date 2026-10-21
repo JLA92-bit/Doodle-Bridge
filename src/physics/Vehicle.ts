@@ -65,12 +65,25 @@ export class Vehicle {
   }
 
   /** Called every physics step before the engine update. */
-  drive(speedMultiplier = 1): void {
-    if (!this.motorOn) return;
-    const target = this.config.motorSpeed * speedMultiplier;
+  drive(boosting = false): void {
+    if (!this.motorOn) {
+      // Engine off (after the run): gently brake the wheels.
+      for (const w of this.wheels) Body.setAngularVelocity(w, w.angularVelocity * 0.9);
+      return;
+    }
+    const c = this.config;
+    const target = c.motorSpeed * (boosting ? c.boostSpeed : 1);
+    const grip = boosting ? Math.min(1, c.motorGrip * 2) : c.motorGrip;
     for (const w of this.wheels) {
       const av = w.angularVelocity;
-      Body.setAngularVelocity(w, av + (target - av) * this.config.motorGrip);
+      Body.setAngularVelocity(w, av + (target - av) * grip);
+    }
+    if (boosting) {
+      const f = c.boostForce * this.chassis.mass;
+      Body.applyForce(this.chassis, this.chassis.position, {
+        x: Math.cos(this.chassis.angle) * f,
+        y: Math.sin(this.chassis.angle) * f,
+      });
     }
     if (this.config.balance > 0) {
       // A rider leaning to stay upright: nudges the spin back towards level, weakly enough that it still tips.

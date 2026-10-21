@@ -11,6 +11,14 @@ import { drawWheelArt, VEHICLE_ART, type VehicleArt } from './vehicleArt';
 const ART_SCALE = RENDER_SCALE * 2;
 const OUTLINE = 0x1c1c21;
 
+/** A piece of a burst vehicle flying off. */
+interface Piece {
+  img: Phaser.GameObjects.Image;
+  vx: number;
+  vy: number;
+  spin: number;
+}
+
 interface Puff {
   x: number;
   y: number;
@@ -39,8 +47,8 @@ export class VehicleRenderer {
   private puffs: Puff[] = [];
   private squash = 0;
   private squashVel = 0;
-  private wasGrounded = true;
-  private prevVy = 0;
+  private pieces: Piece[] = [];
+  private burst = false;
   private exhaustTimer = 0;
   private dustTimer = 0;
   private readonly rand = mulberry32(99);
@@ -54,13 +62,73 @@ export class VehicleRenderer {
     this.frontG = scene.add.graphics().setDepth(depth + 4);
   }
 
-  /** Clears transient effects, for example after Retry. */
+  /** Clears transient effects and reassembles the vehicle, for example after Retry. */
   reset(): void {
     this.puffs = [];
     this.squash = 0;
     this.squashVel = 0;
-    this.wasGrounded = true;
-    this.prevVy = 0;
+    this.pieces.forEach((p) => p.img.destroy());
+    this.pieces = [];
+    this.burst = false;
+    this.setVisible(true);
+  }
+
+  private setVisible(on: boolean): void {
+    this.body?.setVisible(on);
+    this.wheels.forEach((w) => w.setVisible(on));
+    this.backG.setVisible(on);
+    this.frontG.setVisible(on);
+  }
+
+  /** Landing squash, driven by impact speed. */
+  onLand(impact: number): void {
+    this.squashVel += Math.min(0.1, impact * 0.016);
+  }
+
+  /** A puff of exhaust out the back when a boost starts. */
+  onBoost(vehicle: Vehicle): void {
+    const art = VEHICLE_ART[vehicle.config.id];
+    const c = vehicle.chassis;
+    const rear = art.exhaust ?? { x: art.box.x0 + 4, y: 0 };
+    const x = c.position.x + rear.x * Math.cos(c.angle) - rear.y * Math.sin(c.angle);
+    const y = c.position.y + rear.x * Math.sin(c.angle) + rear.y * Math.cos(c.angle);
+    for (let i = 0; i < 8; i++) {
+      this.puffs.push({
+        x, y, vx: -Math.cos(c.angle) * (1 + this.rand() * 2) + (this.rand() - 0.5), vy: (this.rand() - 0.7) * 1.5,
+        r0: 3, r1: 9 + this.rand() * 4, age: 0, life: 500, colour: 0xe8e2d4, alpha: 0.7,
+      });
+    }
+  }
+
+  /** The vehicle bursts into pieces: the body splits in four and the wheels fly off. */
+  explode(vehicle: Vehicle): void {
+    if (this.burst || !this.body) return;
+    this.burst = true;
+    const c = vehicle.chassis;
+    const tex = this.body.texture.getSourceImage() as HTMLCanvasElement;
+    const hw = tex.width / 2;
+    const hh = tex.height / 2;
+    const quads: [number, number, number, number][] = [
+      [0, 0, -1, -1],
+      [hw, 0, 1, -1],
+      [0, hh, -1, 1],
+      [hw, hh, 1, 1],
+    ];
+    for (const [cx, cy, dx, dy] of quads) {
+      const img = this.scene.add
+        .image(c.position.x, c.position.y, this.body.texture.key)
+        .setOrigin(this.body.originX, this.body.originY)
+        .setRotation(c.angle)
+        .setScale(1 / ART_SCALE)
+        .setCrop(cx, cy, hw, hh)
+        .setDepth(this.body.depth);
+      this.pieces.push({ img, vx: dx * (1.5 + this.rand() * 2) + c.velocity.x * 0.5, vy: dy * 1.5 - 4 - this.rand() * 3, spin: dx * (0.05 + this.rand() * 0.1) });
+    }
+    vehicle.wheels.forEach((w, i) => {
+      const img = this.scene.add.image(w.position.x, w.position.y, this.wheels[i]!.texture.key).setScale(1 / ART_SCALE).setDepth(this.depth + 2);
+      this.pieces.push({ img, vx: (i === 0 ? -1 : 1) * (2 + this.rand() * 2), vy: -5 - this.rand() * 3, spin: (this.rand() - 0.5) * 0.6 });
+    });
+    this.setVisible(false);
   }
 
   private ensureSprites(config: VehicleConfig): VehicleArt {
@@ -93,20 +161,24 @@ export class VehicleRenderer {
     return art;
   }
 
-  update(vehicle: Vehicle, status: SimStatus, time: number, deltaMs: number): void {
+  update(vehicle: Vehicle, status: SimStatus, time: number, deltaMs: number, boosting = false): void {
     const config = vehicle.config;
     const art = this.ensureSprites(config);
     const chassis = vehicle.chassis;
     const dt = Math.min(deltaMs, 50) / (1000 / 60);
     const running = status === 'running';
 
-    // Squash on landing: a little spring driven by the impact speed.
-    const grounded = vehicle.grounded;
-    if (running && grounded && !this.wasGrounded && this.prevVy > 2) {
-      this.squashVel += Math.min(0.1, this.prevVy * 0.016);
+    if (this.burst) {
+      for (const p of this.pieces) {
+        p.vy += 0.35 * dt;
+        p.img.x += p.vx * dt;
+        p.img.y += p.vy * dt;
+        p.img.rotation += p.spin * dt;
+      }
+      this.drawPuffs(deltaMs);
+      return;
     }
-    this.wasGrounded = grounded;
-    this.prevVy = chassis.velocity.y;
+
     for (let i = 0; i < dt; i++) {
       this.squashVel += -this.squash * 0.25 - this.squashVel * 0.22;
       this.squash += this.squashVel;
@@ -145,6 +217,7 @@ export class VehicleRenderer {
       time,
       running,
     );
+    if (boosting) this.drawSpeedLines(art, time);
 
     // Effects: exhaust while the engine runs, dust from wheels touching the ground.
     this.exhaustTimer -= deltaMs;
@@ -267,6 +340,19 @@ export class VehicleRenderer {
     }
   }
 
+  /** Motion streaks behind the vehicle while boosting. */
+  private drawSpeedLines(art: VehicleArt, t: number): void {
+    const g = this.backG;
+    const x0 = art.box.x0 - 4;
+    const h = art.box.y1 - art.box.y0;
+    for (let i = 0; i < 4; i++) {
+      const y = art.box.y0 + h * (0.2 + i * 0.2);
+      const len = 14 + ((t / 9 + i * 37) % 18);
+      g.lineStyle(2, 0x3d3d44, 0.5);
+      g.lineBetween(x0 - 4, y, x0 - 4 - len, y);
+    }
+  }
+
   private drawPuffs(deltaMs: number): void {
     const g = this.fxG;
     g.clear();
@@ -288,6 +374,7 @@ export class VehicleRenderer {
   }
 
   destroy(): void {
+    this.pieces.forEach((p) => p.img.destroy());
     this.body?.destroy();
     this.wheels.forEach((w) => w.destroy());
     this.fxG.destroy();

@@ -7,9 +7,10 @@ import { VEHICLES, type VehicleId } from '../src/config/vehicles';
 const levels = import.meta.glob<LevelData>('../src/levels/*.json', { eager: true, import: 'default' });
 const MAX_STEPS = 60 * 60;
 
-function run(level: LevelData, strokes: [number, number][][]): Simulation {
+function run(level: LevelData, strokes: [number, number][][], boosts: number[] = []): Simulation {
   const sim = new Simulation(level);
   for (const s of strokes) sim.addStroke(s.map(toPoint));
+  sim.scheduleBoosts(boosts);
   sim.start();
   while (sim.status === 'running' && sim.steps < MAX_STEPS) sim.step();
   return sim;
@@ -23,7 +24,7 @@ describe('level solver', () => {
       });
 
       it('is beaten by its solution stroke within the ink limit', () => {
-        const sim = run(level, level.solution.strokes);
+        const sim = run(level, level.solution.strokes, level.solution.boosts);
         expect(sim.status).toBe('won');
         expect(sim.inkUsed).toBeLessThanOrEqual(sim.inkTotal);
       });
