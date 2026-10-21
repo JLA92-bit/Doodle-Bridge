@@ -12,7 +12,7 @@ Doodle Bridge is a mobile web game where you draw bridges with limited ink so a 
 | --- | --- |
 | Platform | Mobile web game, installable PWA, portrait orientation |
 | Structure | 60-level campaign + endless mode + daily seeded challenge |
-| Art style | Notebook doodle: lined paper, pencil and crayon lines, hand-drawn wobble |
+| Art style | Notebook doodle: lined paper, pencil and crayon lines, hand-drawn wobble. Vehicles are polished cartoon (no faces) |
 | Physics feel | Wobbly and funny: lines bend, sag and snap; forgiving for new players |
 | Draw timing | Campaign: draw, then press Go. Endless: draw live ahead of a moving vehicle |
 | Vehicle | Auto-drives; tap anywhere (outside drawing) to boost |
@@ -206,8 +206,8 @@ All art is generated in code (procedural vector drawing with a hand-drawn wobble
 - Lines: every shape is drawn with a "rough" stroke (small random offsets, double-stroked like sketching). The open-source library roughjs can render this onto a canvas texture.
 - Palette: graphite grey for terrain, one accent colour per notebook, red for danger, yellow for ink pots and stars.
 - Font: a free handwritten Google Font such as "Patrick Hand" for UI and "Gloria Hallelujah" for big titles, bundled locally for offline play.
-- Vehicles: simple doodle shapes with googly eyes; wheels wobble slightly as they spin.
-- Characters and UI animate at a 12 fps "boil" (the outline redraws slightly each frame) for a living-sketch look, while physics stays at 60 fps.
+- Vehicles: polished semi-realistic cartoon art (glossy shaded paint, chrome, glass reflections, detailed wheels), no faces, so they pop against the doodle world like toy cars on a sketchbook page. *(Changed Oct 21 2026 at Josh's request; replaces doodle vehicles with googly eyes.)*
+- Doodle elements and UI animate at a 12 fps "boil" (the outline redraws slightly each frame) for a living-sketch look, while physics stays at 60 fps. Vehicles stay smooth.
 
 **Screens**
 

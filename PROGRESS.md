@@ -3,7 +3,7 @@
 ## Build phases
 - [x] 1. Setup - Vite + TS + Phaser, folders, CLAUDE.md, ESLint, Vitest, Playwright, GitHub, Cloudflare deploy
 - [x] 2. Drawing + physics prototype - stroke capture, RDP simplify, segment chains, nails, ink meter, undo/clear, Go, Paper Car, test level *(awaiting feel review)*
-- [x] Vehicle art pass (requested after phase 2): all 6 vehicles drawn and driveable, see below
+- [x] Vehicle art pass (requested after phase 2): all 6 vehicles drawn and driveable, then restyled to polished cartoon, see below
 - [ ] 3. Breaking + game feel
 - [ ] 4. Rough art pass
 - [ ] 5. Campaign framework
@@ -46,6 +46,11 @@ Feel (Josh, on phone)
   `src/config/vehicles.ts` now so they can be previewed with `?vehicle=skateboard` (also schoolBus, monsterTruck,
   unicycle, rocketCar); unlocking them stays in phase 8. A test checks every vehicle crosses the test bridge and
   falls without one.
+- Vehicle restyle (Josh: "semi more realistic / cartoony", no faces, vehicles only): each vehicle is painted once
+  with Canvas 2D gradients (glossy paint, chrome, glass with reflections, wheel arches cut out so wheels show
+  through, detailed rims) into a high resolution texture that follows the physics. Live parts are drawn per frame:
+  skateboard trucks, monster truck shocks, the unicycle rider's legs and arms (helmet with dark visor, no face) and
+  the rocket flame. The engine rumbles while idling. PLAN.md updated.
 - Level `start` is now the ground point under the vehicle, so any vehicle spawns resting on its wheels (taller
   vehicles were spawning inside the ground).
 - Unicycle balance is a weak self-righting nudge: it wobbles about 20 degrees but stays playable.
