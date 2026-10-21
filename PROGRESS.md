@@ -29,7 +29,7 @@ Feel (Josh, on phone)
 - [ ] Smooth frame rate
 
 ## Decisions log
-- Hosting on Cloudflare (a Worker at https://doodle-bridge.joshavard.workers.dev) instead of Vercel: the Cloudflare account is already connected to this workspace and is free. Pages direct upload was blocked by the sandbox proxy, so `scripts/deploy-worker.mjs` serves dist/ from a Worker. Each phase redeploys the same URL.
+- Hosting on Cloudflare (a Worker at https://doodle-bridge.joshmakesgames.app) instead of Vercel: the Cloudflare account is already connected to this workspace and is free. Pages direct upload was blocked by the sandbox proxy, so `scripts/deploy-worker.mjs` serves dist/ from a Worker. Each phase redeploys the same URL.
 - Physics uses standalone matter-js (same engine Phaser bundles) stepped at a fixed 60 Hz, so the solver test, the game and future replay checks are identical and deterministic.
 - Slow motion after Go is render-time only (the sim still takes fixed steps), so it does not affect determinism.
 - Both stroke ends snap to a nail within 26 px (plan only required the start); more forgiving.
