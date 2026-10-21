@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f1e1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Doodle Bridge</title>
+    <style>
+      @font-face { font-family: 'Patrick Hand'; src: url('./fonts/PatrickHand.woff2') format('woff2'); font-display: block; }
+      @font-face { font-family: 'Gloria Hallelujah'; src: url('./fonts/GloriaHallelujah.woff2') format('woff2'); font-display: block; }
+      html, body { margin: 0; padding: 0; height: 100%; background: #e9e1cc; overflow: hidden; overscroll-behavior: none; }
+      body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
