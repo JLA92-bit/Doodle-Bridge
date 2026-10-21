@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { COLOURS, FONT_TITLE, FONT_UI, HUD } from '../config/ui';
+import { isVehicleId } from '../config/vehicles';
 import { GAME_HEIGHT, GAME_WIDTH, MAX_STEPS_PER_FRAME, PHYSICS, STEP_MS } from '../config/world';
 import type { LevelData } from '../game/Level';
 import testLevel from '../levels/test-01.json';
@@ -9,6 +10,7 @@ import { rebuild, Simulation } from '../physics/Simulation';
 import { Button } from '../render/Button';
 import { addPaper } from '../render/PaperBackground';
 import { RENDER_SCALE, setupCamera } from '../render/scale';
+import { VehicleRenderer } from '../render/VehicleRenderer';
 
 /** Campaign play: draw with the world frozen, press Go, watch it work (or not). */
 export class GameScene extends Phaser.Scene {
@@ -23,7 +25,7 @@ export class GameScene extends Phaser.Scene {
 
   private worldG!: Phaser.GameObjects.Graphics;
   private strokeG!: Phaser.GameObjects.Graphics;
-  private carG!: Phaser.GameObjects.Graphics;
+  private car!: VehicleRenderer;
   private hudG!: Phaser.GameObjects.Graphics;
   private inkText!: Phaser.GameObjects.Text;
   private message!: Phaser.GameObjects.Text;
@@ -39,14 +41,16 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     setupCamera(this);
     this.level = testLevel as LevelData;
-    this.sim = new Simulation(this.level);
+    // Dev preview until the garage exists: ?vehicle=monsterTruck
+    const vehicleParam = new URLSearchParams(window.location.search).get('vehicle');
+    this.sim = new Simulation(this.level, undefined, isVehicleId(vehicleParam) ? vehicleParam : undefined);
     this.accumulator = 0;
     this.fails = 0;
 
     addPaper(this, GAME_WIDTH, GAME_HEIGHT);
     this.worldG = this.add.graphics();
     this.strokeG = this.add.graphics();
-    this.carG = this.add.graphics();
+    this.car = new VehicleRenderer(this, 5);
     this.hudG = this.add.graphics().setDepth(10);
 
     this.add
@@ -149,6 +153,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       // Retry keeps the drawing so players can tweak it. Clear wipes it.
       this.sim = rebuild(this.sim);
+      this.car.reset();
     }
     this.refreshUi();
   }
@@ -170,7 +175,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- loop ----------
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     if (this.sim.status === 'running') {
       const dt = Math.min(delta, 100);
       const scale = this.runTime < PHYSICS.slowMoMs ? PHYSICS.slowMoFactor : 1;
@@ -186,7 +191,7 @@ export class GameScene extends Phaser.Scene {
       if (this.sim.status !== 'running') this.onRunEnded();
     }
     this.drawStrokes();
-    this.drawCar();
+    this.car.update(this.sim.vehicle, this.sim.status, time, delta);
     this.drawHud();
   }
 
@@ -250,48 +255,6 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(2.5, COLOURS.graphite, 1);
       g.strokeCircle(a.x, a.y, 7);
       g.lineBetween(a.x - 3, a.y - 3, a.x + 3, a.y + 3);
-    }
-  }
-
-  private drawCar(): void {
-    const g = this.carG;
-    const v = this.sim.vehicle;
-    g.clear();
-    for (const w of [v.backWheel, v.frontWheel]) {
-      const r = v.config.wheelRadius;
-      g.fillStyle(0x4a4a50, 1);
-      g.fillCircle(w.position.x, w.position.y, r);
-      g.fillStyle(0xf5f0e2, 1);
-      g.fillCircle(w.position.x, w.position.y, r * 0.45);
-      g.lineStyle(2.5, COLOURS.graphite, 1);
-      g.strokeCircle(w.position.x, w.position.y, r);
-      const c = Math.cos(w.angle) * r * 0.45;
-      const s = Math.sin(w.angle) * r * 0.45;
-      g.lineBetween(w.position.x - c, w.position.y - s, w.position.x + c, w.position.y + s);
-    }
-    const body = v.chassis;
-    g.fillStyle(v.config.colour, 1);
-    g.fillPoints(body.vertices, true);
-    g.lineStyle(3, COLOURS.graphite, 1);
-    g.strokePoints(body.vertices, true);
-
-    // Googly eyes: pupils lag behind the motion.
-    const cos = Math.cos(body.angle);
-    const sin = Math.sin(body.angle);
-    const local = (x: number, y: number) => ({
-      x: body.position.x + x * cos - y * sin,
-      y: body.position.y + x * sin + y * cos,
-    });
-    const lagX = Phaser.Math.Clamp(-body.velocity.x * 0.6, -2.5, 2.5);
-    const lagY = Phaser.Math.Clamp(-body.velocity.y * 0.6 + 1.5, -2.5, 2.5);
-    for (const ex of [10, 21]) {
-      const e = local(ex, -v.config.chassisHeight / 2 - 2);
-      g.fillStyle(0xffffff, 1);
-      g.fillCircle(e.x, e.y, 6);
-      g.lineStyle(2, COLOURS.graphite, 1);
-      g.strokeCircle(e.x, e.y, 6);
-      g.fillStyle(0x222226, 1);
-      g.fillCircle(e.x + lagX, e.y + lagY, 2.6);
     }
   }
 

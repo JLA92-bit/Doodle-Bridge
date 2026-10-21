@@ -9,7 +9,7 @@ import { toPoint, type Point } from './geometry';
 import { buildStroke, type BuiltStroke } from './StrokeBuilder';
 import { Vehicle } from './Vehicle';
 
-const { Body, Composite, Engine, Vertices } = Matter;
+const { Body, Composite, Engine, Events, Vertices } = Matter;
 
 export type SimStatus = 'drawing' | 'running' | 'won' | 'crashed';
 
@@ -57,6 +57,19 @@ export class Simulation {
     }
     Composite.add(this.engine.world, this.terrain);
     this.spawnVehicle();
+    const markContacts = (e: Matter.IEventCollision<Matter.Engine>) => {
+      for (const pair of e.pairs) {
+        this.markWheel(pair.bodyA);
+        this.markWheel(pair.bodyB);
+      }
+    };
+    Events.on(this.engine, 'collisionStart', markContacts);
+    Events.on(this.engine, 'collisionActive', markContacts);
+  }
+
+  private markWheel(body: Matter.Body): void {
+    const i = this.vehicle.wheels.indexOf(body);
+    if (i !== -1) this.vehicle.wheelContacts[i] = true;
   }
 
   get size() {
@@ -106,6 +119,7 @@ export class Simulation {
   step(): void {
     if (this.status !== 'running') return;
     this.vehicle.drive();
+    this.vehicle.wheelContacts.fill(false);
     Engine.update(this.engine, STEP_MS);
     this.steps++;
     this.checkEnd();
@@ -126,7 +140,11 @@ export class Simulation {
   }
 
   private spawnVehicle(): void {
-    this.vehicle = new Vehicle(getVehicle(this.vehicleId), toPoint(this.level.start));
+    // level.start is the ground point under the vehicle, so any vehicle spawns resting on its wheels.
+    const config = getVehicle(this.vehicleId);
+    const ground = toPoint(this.level.start);
+    const reach = Math.max(...config.wheels.map((w) => w.y + w.r));
+    this.vehicle = new Vehicle(config, { x: ground.x, y: ground.y - reach - 1 });
     Composite.add(this.engine.world, this.vehicle.composite);
   }
 }

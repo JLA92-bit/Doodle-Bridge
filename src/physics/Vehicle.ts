@@ -5,12 +5,14 @@ import type { Point } from './geometry';
 
 const { Bodies, Body, Composite, Constraint } = Matter;
 
-/** A chassis on two motorised wheels. The wheels spin towards a target speed every step. */
+/** A chassis on motorised wheels. The wheels spin towards a target speed every step. */
 export class Vehicle {
   readonly chassis: Matter.Body;
-  readonly backWheel: Matter.Body;
-  readonly frontWheel: Matter.Body;
+  /** Wheels in config order (back to front). */
+  readonly wheels: Matter.Body[];
   readonly composite: Matter.Composite;
+  /** Which wheels touched something during the last step (updated by the Simulation). */
+  readonly wheelContacts: boolean[];
   motorOn = false;
 
   constructor(readonly config: VehicleConfig, start: Point) {
@@ -23,45 +25,58 @@ export class Vehicle {
       label: 'chassis',
       collisionFilter: filter,
     });
-    const wheel = (dx: number) =>
-      Bodies.circle(start.x + dx, start.y + c.wheelOffsetY, c.wheelRadius, {
+    this.wheels = c.wheels.map((w) =>
+      Bodies.circle(start.x + w.x, start.y + w.y, w.r, {
         density: c.wheelDensity,
         friction: c.wheelFriction,
         frictionStatic: 2,
         restitution: 0.1,
         label: 'wheel',
         collisionFilter: filter,
-      });
-    this.backWheel = wheel(-c.wheelOffsetX);
-    this.frontWheel = wheel(c.wheelOffsetX);
-    const axle = (w: Matter.Body, dx: number) =>
+      }),
+    );
+    this.wheelContacts = this.wheels.map(() => false);
+    const axles = this.wheels.map((wheel, i) =>
       Constraint.create({
         bodyA: this.chassis,
-        pointA: { x: dx, y: c.wheelOffsetY },
-        bodyB: w,
+        pointA: { x: c.wheels[i]!.x, y: c.wheels[i]!.y },
+        bodyB: wheel,
         pointB: { x: 0, y: 0 },
         length: 0,
         stiffness: c.axleStiffness,
         damping: c.axleDamping,
         label: 'axle',
-      });
+      }),
+    );
     this.composite = Composite.create({ label: 'vehicle' });
-    Composite.add(this.composite, [
-      this.chassis,
-      this.backWheel,
-      this.frontWheel,
-      axle(this.backWheel, -c.wheelOffsetX),
-      axle(this.frontWheel, c.wheelOffsetX),
-    ]);
+    Composite.add(this.composite, [this.chassis, ...this.wheels, ...axles]);
   }
 
-  /** Called every physics step. */
+  get frontWheel(): Matter.Body {
+    return this.wheels[this.wheels.length - 1]!;
+  }
+
+  get backWheel(): Matter.Body {
+    return this.wheels[0]!;
+  }
+
+  get grounded(): boolean {
+    return this.wheelContacts.some(Boolean);
+  }
+
+  /** Called every physics step before the engine update. */
   drive(speedMultiplier = 1): void {
     if (!this.motorOn) return;
     const target = this.config.motorSpeed * speedMultiplier;
-    for (const w of [this.backWheel, this.frontWheel]) {
+    for (const w of this.wheels) {
       const av = w.angularVelocity;
       Body.setAngularVelocity(w, av + (target - av) * this.config.motorGrip);
+    }
+    if (this.config.balance > 0) {
+      // A rider leaning to stay upright: nudges the spin back towards level, weakly enough that it still tips.
+      const angle = Math.atan2(Math.sin(this.chassis.angle), Math.cos(this.chassis.angle));
+      const av = this.chassis.angularVelocity;
+      Body.setAngularVelocity(this.chassis, av * 0.92 - angle * this.config.balance);
     }
   }
 

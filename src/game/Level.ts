@@ -15,7 +15,7 @@ export interface LevelData {
   terrain: { points: PointTuple[] }[];
   /** Nail positions that pin stroke ends. */
   anchors: PointTuple[];
-  /** Chassis centre of the vehicle at the start. */
+  /** Ground point the vehicle starts on (its wheels rest just above this). */
   start: PointTuple;
   /** Win zone: the front wheel must enter this rectangle. */
   flag: { x: number; y: number; w: number; h: number };
