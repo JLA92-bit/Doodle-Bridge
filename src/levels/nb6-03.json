@@ -1,0 +1,38 @@
+{
+ "id": "nb6-03",
+ "notebook": 6,
+ "name": "Hinged Plank",
+ "tip": "A line with one nail swings. Let the lift hold up its other end.",
+ "index": 3,
+ "terrain": [
+  {
+   "points": [[0, 640], [120, 640], [120, 854], [0, 854]]
+  },
+  {
+   "points": [[375, 570], [480, 570], [480, 854], [375, 854]]
+  }],
+ "platforms": [
+  {
+   "points": [[120, 670], [335, 670], [335, 694], [120, 694]],
+   "move": [0, -90],
+   "periodMs": 10000,
+   "phase": 0
+  }],
+ "anchors": [[375, 570]],
+ "start": [55, 639],
+ "flag": {
+  "x": 410,
+  "y": 480,
+  "w": 60,
+  "h": 90
+ },
+ "ink": 150,
+ "stars": {
+  "ink": 110,
+  "timeMs": 7000
+ },
+ "solution": {
+  "strokes": [[[375, 570], [350, 590], [315, 622]]],
+  "boosts": []
+ }
+}
