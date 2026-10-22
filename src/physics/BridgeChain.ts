@@ -17,18 +17,25 @@ export interface Link {
   broken: boolean;
 }
 
+/** A body (a moving platform) that an anchor is fixed to; null/undefined means the fixed world. */
+export type AnchorHost = Matter.Body | null | undefined;
+
 /** A drawn stroke as a chain of thin rectangles joined by springy constraints. */
 export class BridgeChain {
   readonly segments: Matter.Body[] = [];
   readonly links: Link[] = [];
   readonly pins: Matter.Constraint[] = [];
   readonly lengths: number[] = [];
+  /** Segments rubbed out by an eraser zone (they have left the world). */
+  readonly erased: boolean[] = [];
   readonly composite: Matter.Composite;
 
   constructor(
     readonly id: number,
     readonly stroke: BuiltStroke,
     readonly pen: PenConfig,
+    /** Per anchor index: the body the nail sits on (moving platforms), or null for the world. */
+    hosts: readonly AnchorHost[] = [],
   ) {
     this.composite = Composite.create({ label: `stroke-${id}` });
     const pts = stroke.points;
@@ -50,6 +57,7 @@ export class BridgeChain {
       });
       this.segments.push(body);
       this.lengths.push(len);
+      this.erased.push(false);
     }
 
     // Two constraints per joint, offset across the line, give it some resistance to bending.
@@ -74,22 +82,24 @@ export class BridgeChain {
       this.links.push({ index: i, springs, stress: 0, over: 0, broken: false });
     }
 
-    if (stroke.startAnchor !== null) this.pin(this.segments[0]!, pts[0]!, pts[1]!);
+    if (stroke.startAnchor !== null) this.pin(this.segments[0]!, pts[0]!, pts[1]!, hosts[stroke.startAnchor]);
     if (stroke.endAnchor !== null) {
-      this.pin(this.segments[this.segments.length - 1]!, pts[pts.length - 1]!, pts[pts.length - 2]!);
+      this.pin(this.segments[this.segments.length - 1]!, pts[pts.length - 1]!, pts[pts.length - 2]!, hosts[stroke.endAnchor]);
     }
 
     Composite.add(this.composite, [...this.segments, ...this.links.flatMap((l) => l.springs), ...this.pins]);
   }
 
   /** Nail: a stiff hinge at the anchor plus a softer brace a little way along the stroke. */
-  private pin(body: Matter.Body, at: Point, toward: Point): void {
+  private pin(body: Matter.Body, at: Point, toward: Point, host: AnchorHost): void {
+    const fix = (p: Point) =>
+      host ? { bodyA: host, pointA: { x: p.x - host.position.x, y: p.y - host.position.y } } : { pointA: { ...p } };
     const d = Math.max(dist(at, toward), 1);
     const along = Math.min(ANCHOR.braceDistance, d * 0.8);
     const brace = { x: at.x + ((toward.x - at.x) / d) * along, y: at.y + ((toward.y - at.y) / d) * along };
     this.pins.push(
       Constraint.create({
-        pointA: { ...at },
+        ...fix(at),
         bodyB: body,
         pointB: { x: at.x - body.position.x, y: at.y - body.position.y },
         length: 0,
@@ -97,7 +107,7 @@ export class BridgeChain {
         label: 'nail',
       }),
       Constraint.create({
-        pointA: { ...brace },
+        ...fix(brace),
         bodyB: body,
         pointB: { x: brace.x - body.position.x, y: brace.y - body.position.y },
         length: 0,
@@ -112,6 +122,26 @@ export class BridgeChain {
     link.broken = true;
     link.stress = 0;
     for (const c of link.springs) Composite.remove(this.composite, c);
+  }
+
+  /**
+   * Rubs out a segment: its body, the springs of both neighbouring joints and any nail
+   * on it leave the world. Returns where it was, or null if it was already gone.
+   */
+  erase(i: number): Point | null {
+    if (this.erased[i]) return null;
+    this.erased[i] = true;
+    const body = this.segments[i]!;
+    const at = { x: body.position.x, y: body.position.y };
+    for (const link of [this.links[i - 1], this.links[i]]) {
+      if (!link) continue;
+      link.broken = true;
+      link.stress = 0;
+      for (const c of link.springs) Composite.remove(this.composite, c);
+    }
+    for (const pin of this.pins) if (pin.bodyB === body) Composite.remove(this.composite, pin);
+    Composite.remove(this.composite, body);
+    return at;
   }
 
   /** World position of a link's joint. */
@@ -141,6 +171,10 @@ export class BridgeChain {
     const out: { points: Point[]; stress: number[] }[] = [];
     let run: { points: Point[]; stress: number[] } | null = null;
     this.segments.forEach((_, i) => {
+      if (this.erased[i]) {
+        run = null;
+        return;
+      }
       const [start, end] = this.segmentEnds(i);
       const link = this.links[i - 1];
       if (!run || !link || link.broken) {

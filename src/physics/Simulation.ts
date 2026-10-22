@@ -1,9 +1,10 @@
 import Matter from 'matter-js';
 import { BOOST, CRASH, PHYSICS, STEP_MS } from '../config/world';
+import { CHECKPOINT, PLATFORM, WIND } from '../config/mechanics';
 import { PENS, type PenConfig, type PenId } from '../config/pens';
 import { getVehicle, type VehicleId } from '../config/vehicles';
 import { anchorPoints, levelSize, terrainPolygons, type LevelData, type PlatformDef } from '../game/Level';
-import { BridgeChain } from './BridgeChain';
+import { BridgeChain, type AnchorHost } from './BridgeChain';
 import { updateBreaks } from './BreakSystem';
 import { CAT } from './categories';
 import { toPoint, type Point } from './geometry';
@@ -48,10 +49,12 @@ export class Simulation {
   /** Steps on which boosts started, for replays. */
   readonly boosts: number[] = [];
   snaps = 0;
-  /** Moving platforms (CONTRACT: filled in by the mechanics work). */
+  /** Moving platforms, one per `level.platforms` entry. */
   readonly platforms: PlatformState[] = [];
   /** True once the vehicle has passed the level's checkpoint during this run. */
   checkpointReached = false;
+  /** Per anchor index: the platform body the nail rides on (null for world nails). */
+  private readonly anchorHosts: AnchorHost[];
   private nextStrokeId = 0;
   private finishStep: number | null = null;
   private boostUntil = -1;
@@ -72,6 +75,7 @@ export class Simulation {
     this.pen = PENS[penId];
     this.inkTotal = Math.round(level.ink * this.pen.inkMultiplier);
     this.anchors = anchorPoints(level);
+    this.anchorHosts = this.anchors.map(() => null);
     this.engine = Engine.create({
       gravity: { x: 0, y: PHYSICS.gravityY },
       positionIterations: PHYSICS.positionIterations,
@@ -91,6 +95,8 @@ export class Simulation {
       this.terrain.push(body);
     }
     Composite.add(this.engine.world, this.terrain);
+    this.buildPlatforms();
+    this.checkpointReached = options.fromCheckpoint === true && level.checkpoint !== undefined;
     this.spawnVehicle();
     const markContacts = (e: Matter.IEventCollision<Matter.Engine>) => {
       for (const pair of e.pairs) {
@@ -128,7 +134,7 @@ export class Simulation {
 
   /** Adds an already built stroke (used when retrying with the same drawing). */
   addBuilt(built: BuiltStroke): BridgeChain {
-    const chain = new BridgeChain(this.nextStrokeId++, built, this.pen);
+    const chain = new BridgeChain(this.nextStrokeId++, built, this.pen, this.anchorHosts);
     this.strokes.push(chain);
     Composite.add(this.engine.world, chain.composite);
     return chain;
@@ -184,14 +190,18 @@ export class Simulation {
     if (this.status === 'running' && this.scheduledBoosts.has(this.steps)) this.boost();
     this.vehicle.drive(this.boosting);
     this.vehicle.wheelContacts.fill(false);
+    this.movePlatforms(this.steps + 1);
+    this.applyWind();
     Engine.update(this.engine, STEP_MS);
     this.steps++;
+    this.applyErasers();
     for (const snap of updateBreaks(this.strokes)) {
       this.snaps++;
       this.events.push({ type: 'snap', at: snap.at });
     }
     if (this.status === 'running') {
       this.checkLanding();
+      this.checkCheckpoint();
       this.checkEnd();
     }
   }
@@ -233,6 +243,85 @@ export class Simulation {
       this.stalledSteps = 0;
     } else this.stalledSteps++;
     if (this.stalledSteps >= stepsFor(CRASH.stallMs)) return this.crash('stalled');
+
+    if (this.level.timeLimitMs !== undefined && this.steps * STEP_MS > this.level.timeLimitMs) this.crash('timeout');
+  }
+
+  private checkCheckpoint(): void {
+    const cp = this.level.checkpoint;
+    if (!cp || this.checkpointReached || this.vehicle.chassis.position.x <= cp[0]) return;
+    this.checkpointReached = true;
+    this.events.push({ type: 'checkpoint' });
+  }
+
+  private buildPlatforms(): void {
+    for (const def of this.level.platforms ?? []) {
+      const verts = Vertices.clockwiseSort(def.points.map((p) => ({ ...toPoint(p) })));
+      const centre = Vertices.centre(verts);
+      const body = Body.create({
+        position: centre,
+        vertices: verts,
+        isStatic: true,
+        friction: PLATFORM.friction,
+        frictionStatic: PLATFORM.frictionStatic,
+        label: 'platform',
+        collisionFilter: { category: CAT.terrain, mask: CAT.stroke | CAT.vehicle },
+      });
+      const state: PlatformState = { body, def };
+      const base = { x: body.position.x, y: body.position.y };
+      platformBase.set(body, base);
+      this.platforms.push(state);
+      Body.setPosition(body, offsetPosition(base, def, 0));
+      Composite.add(this.engine.world, body);
+      // Nails on the platform snap strokes like world nails, but pin to the platform body.
+      const o = platformOffset(def, 0);
+      for (const n of def.nails ?? []) {
+        this.anchors.push({ x: n[0] + o.x, y: n[1] + o.y });
+        this.anchorHosts.push(body);
+      }
+    }
+  }
+
+  /** Puts every platform where it belongs after `step` steps, giving it the velocity to carry riders. */
+  private movePlatforms(step: number): void {
+    // Matter supports a third argument (updateVelocity); the bundled types only list two.
+    const setPosition = Body.setPosition as (b: Matter.Body, pos: Matter.Vector, updateVelocity?: boolean) => void;
+    for (const p of this.platforms) {
+      setPosition(p.body, offsetPosition(platformBase.get(p.body)!, p.def, step * STEP_MS), true);
+    }
+  }
+
+  /** Wind: a force on vehicle parts and live line segments inside a zone, giving `force` px/step^2. */
+  private applyWind(): void {
+    const zones = this.level.wind;
+    if (!zones?.length) return;
+    const k = WIND.scale / (STEP_MS * STEP_MS);
+    const push = (b: Matter.Body) => {
+      for (const z of zones) {
+        if (b.position.x < z.x || b.position.x > z.x + z.w || b.position.y < z.y || b.position.y > z.y + z.h) continue;
+        Body.applyForce(b, b.position, { x: z.force[0] * k * b.mass, y: z.force[1] * k * b.mass });
+      }
+    };
+    if (this.status === 'running') {
+      push(this.vehicle.chassis);
+      this.vehicle.wheels.forEach(push);
+    }
+    for (const s of this.strokes) s.segments.forEach((b, i) => !s.erased[i] && push(b));
+  }
+
+  /** Eraser zones rub out any line segment whose centre is inside. */
+  private applyErasers(): void {
+    const zones = this.level.erasers;
+    if (!zones?.length) return;
+    for (const s of this.strokes) {
+      s.segments.forEach((b, i) => {
+        if (s.erased[i]) return;
+        const { x, y } = b.position;
+        if (!zones.some((z) => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h)) return;
+        const at = s.erase(i);
+        if (at) this.events.push({ type: 'erase', at });
+      });
+    }
   }
 
   private finish(status: 'won' | 'crashed'): void {
@@ -254,9 +343,10 @@ export class Simulation {
   private spawnVehicle(): void {
     // level.start is the ground point under the vehicle, so any vehicle spawns resting on its wheels.
     const config = getVehicle(this.vehicleId);
-    const ground = toPoint(this.level.start);
+    const useCheckpoint = this.options.fromCheckpoint === true && this.level.checkpoint !== undefined;
+    const ground = toPoint(useCheckpoint ? this.level.checkpoint! : this.level.start);
     const reach = Math.max(...config.wheels.map((w) => w.y + w.r));
-    this.vehicle = new Vehicle(config, { x: ground.x, y: ground.y - reach - 1 });
+    this.vehicle = new Vehicle(config, { x: ground.x, y: ground.y - reach - (useCheckpoint ? CHECKPOINT.spawnGap : 1) });
     Composite.add(this.engine.world, this.vehicle.composite);
   }
 }
@@ -271,6 +361,20 @@ export interface SimOptions {
 export interface PlatformState {
   body: Matter.Body;
   def: PlatformDef;
+}
+
+/** Where each platform body sits at the start of its cycle's path (its centre before any offset). */
+const platformBase = new WeakMap<Matter.Body, Point>();
+
+/** Offset of a platform from its path start after `t` ms of running: sine-eased there and back. */
+function platformOffset(def: PlatformDef, t: number): Point {
+  const k = 0.5 - 0.5 * Math.cos(2 * Math.PI * (t / def.periodMs + (def.phase ?? 0)));
+  return { x: def.move[0] * k, y: def.move[1] * k };
+}
+
+function offsetPosition(base: Point, def: PlatformDef, t: number): Point {
+  const o = platformOffset(def, t);
+  return { x: base.x + o.x, y: base.y + o.y };
 }
 
 export function rebuild(sim: Simulation, options: SimOptions = {}): Simulation {
