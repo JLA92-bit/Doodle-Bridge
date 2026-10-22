@@ -56,6 +56,7 @@ The player draws strokes with a finger; each stroke becomes a chain of physics s
 - An ink bar shows remaining ink. Ink used = total stroke length.
 - Undo button removes the last stroke and refunds its ink. Clear button resets all.
 - Campaign: physics is frozen while drawing; press Go to start. Endless: physics runs live and the camera scrolls.
+- Long levels (bosses, up to 3 screens wide): while drawing, pan with the arrows at the page edges or a two-finger drag; during the run the camera follows the vehicle. An overview strip shows start, checkpoint and flag.
 
 **Breaking**
 

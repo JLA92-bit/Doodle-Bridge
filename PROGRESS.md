@@ -7,7 +7,7 @@
 - [x] 3. Breaking + game feel - stress tint, snapping, debris, crash/win rules, hit-stop, shake, sounds, confetti, stars, boost *(awaiting feel review)*
 - [x] 4. Rough art pass - roughjs terrain, flag, nails, buttons, ink bar, stars and pause panel with 12 fps boil; pencil-textured lines; page on a desk filling any screen; pause button and run timer *(awaiting look review)*
 - [x] 5. Campaign framework - level registry, save + unlock rules, title, notebook select, level select, results panel, pause Levels, dev level editor, solver test, level-stats script *(awaiting review)*
-- [ ] 6. Content: 60 levels
+- [x] 6. Content: 60 levels - all 6 notebooks written and solver-verified; platforms, wind, erasers, darkness, checkpoints, time limits, wide levels with panning, 6 paper styles *(awaiting play review)*
 - [ ] 7. Endless + daily
 - [ ] 8. Unlocks + garage
 - [ ] 9. Online leaderboard
@@ -16,7 +16,7 @@
 ## Acceptance criteria
 Automated
 - [ ] Unit tests: scoring, combo, star rules, unlock rules, seeded generation (seeded RNG, star rules, level score, break/crash/boost rules done)
-- [ ] Solver test beats all 60 levels (3 of 60 authored so far, all pass)
+- [x] Solver test beats all 60 levels (each also fails with no drawing; every solution also wins in at least 5 of 8 jittered replays)
 - [x] Playwright smoke at 390 x 844: title loads, a level starts, a stroke can be drawn, results screen appears (and progress saves)
 - [ ] Bundle under 3 MB (now ~1.4 MB raw, ~370 KB gzip); Lighthouse PWA + performance 90+
 - [ ] Edge function rejects impossible score, accepts valid one
@@ -99,6 +99,25 @@ Feel (Josh, on phone)
     in the real game, export JSON; `&level=nb1-02` edits an existing level). `?play=nb1-02` jumps into a level.
     `npx tsx scripts/level-stats.ts` plays every solution and suggests star targets.
 
+- Phase 6 decisions and findings:
+  - Built by parallel agents against a fixed contract (level format + Simulation API), then integrated: one for
+    simulation mechanics, one for rendering/HUD, one per notebook of levels.
+  - Moving platforms are sine-eased kinematic bodies; their nails carry pinned lines. Lines are ropes: a platform
+    nail moving more than ~30-40 px away from the other end snaps the line, so platforms are used as lifts,
+    bobbing islands and anchors with small travel, not ferries (the car out-runs them).
+  - Wind is an acceleration in px per step squared (mass independent); 0.03-0.08 is the useful range.
+  - Erasers remove any segment whose centre enters them, every step after Go; "floating" nails in the air are used
+    to hold lines up over erasers because a pinned line cannot hold an arch.
+  - Checkpoint retries restart the clock and platform timing from zero; levels were checked from the checkpoint.
+  - The car cannot climb drawn uphill lines (they sag), so climbs are terrain; heavy vehicles mostly fail by sagging
+    and stalling on long spans rather than snapping. Pencil may be made weaker later if snapping should feature more.
+  - Notebook 2 levels all need a boost; ink there is small (80-300) because jumps, not bridges, are the puzzle.
+  - Vitest's fs module cache kept stale import.meta.glob results, silently skipping new level files; disabled.
+  - Rendering: a second static UI camera keeps the HUD fixed while the world scrolls; darkness is one low-res canvas
+    veil with baked light gradients; paper styles are baked per 480 px segment. Cost is about 10% frame rate.
+  - Night paper switches HUD text and outlines to pale colours.
+
 ## Known gaps to revisit
+- Two-finger pan and the eraser crumb effect were not exercised in automated tests (single-pointer browser); check on a phone.
 - Frame rate in the sandbox's software-rendered test browser is low (about 10 fps at 2x); this does not reflect phones.
   The phase 10 performance pass checks a real mid-range phone.

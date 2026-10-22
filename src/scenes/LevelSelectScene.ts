@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { Sfx } from '../audio/Sfx';
 import { BOSS_LEVEL, LEVELS_PER_NOTEBOOK, NOTEBOOKS, OPTIONAL_LEVELS, levelId } from '../config/notebooks';
+import { PAPER_THEMES } from '../config/theme';
 import { GAME_WIDTH } from '../config/world';
 import { getLevel } from '../game/Levels';
 import { levelUnlocked, notebookStars } from '../game/Progress';
@@ -26,15 +27,16 @@ export class LevelSelectScene extends Phaser.Scene {
   }
 
   create(data: { notebook?: number }): void {
-    setupScreen(this);
     const nbId = data.notebook ?? (this.registry.get('notebook') as number | undefined) ?? 1;
     const nb = NOTEBOOKS.find((n) => n.id === nbId) ?? NOTEBOOKS[0]!;
+    setupScreen(this, nb.paper);
+    const theme = PAPER_THEMES[nb.paper];
     const s = save();
 
     new Button(this, 66, 40, 'Back', () => goTo(this, 'NotebookSelect'), { width: 96, height: 46, fontSize: 24 });
-    addText(this, GAME_WIDTH / 2 + 30, 40, `${nb.id}. ${nb.title}`, 34, { title: true });
+    addText(this, GAME_WIDTH / 2 + 30, 40, `${nb.id}. ${nb.title}`, 34, { title: true, colour: theme.text });
     addStar(this, GAME_WIDTH - 98, 100, true, 14);
-    addText(this, GAME_WIDTH - 82, 100, `${notebookStars(s, nb.id)} / ${LEVELS_PER_NOTEBOOK * 3}`, 24).setOrigin(0, 0.5);
+    addText(this, GAME_WIDTH - 82, 100, `${notebookStars(s, nb.id)} / ${LEVELS_PER_NOTEBOOK * 3}`, 24, { colour: theme.text }).setOrigin(0, 0.5);
 
     this.drawPath(nb.accent);
 
@@ -63,7 +65,7 @@ export class LevelSelectScene extends Phaser.Scene {
       else addText(this, x, y - 2, `${i}`, boss ? 44 : 36, { title: true });
 
       if (boss) addText(this, x, y + r + 16, 'Boss', 22, { colour: '#d8433b' });
-      if (OPTIONAL_LEVELS.includes(i)) addText(this, x, y - r - 10, 'bonus', 18, { colour: '#6b6b72' });
+      if (OPTIONAL_LEVELS.includes(i)) addText(this, x, y - r - 10, 'bonus', 18, { colour: theme.dark ? '#b9bfdc' : '#6b6b72' });
       if (state === 'done' || state === 'open') {
         const stars = s.record(id).stars;
         stars.forEach((on, k) => addStar(this, x + (k - 1) * 22, y + r + (boss ? 38 : 14), on, 10));

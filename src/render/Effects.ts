@@ -4,7 +4,7 @@ import { settings } from '../game/Settings';
 import type { Point } from '../physics/geometry';
 
 interface Particle {
-  kind: 'confetti' | 'puff' | 'fleck' | 'spark';
+  kind: 'confetti' | 'puff' | 'fleck' | 'spark' | 'crumb';
   x: number;
   y: number;
   vx: number;
@@ -52,6 +52,22 @@ export class Effects {
         size: this.r(3, 6), colour: 0x3d3d44, age: 0, life: this.r(500, 900), gravity: 0.12, drag: 0.99,
       });
     }
+  }
+
+  /** Pink rubber crumbs and a faint dust puff where an eraser rubbed out part of a line. */
+  eraseCrumbs(at: Point): void {
+    const colours = [0xf4a6b8, 0xf7c4d0, 0xe887a0, 0xffffff];
+    for (let i = 0; i < 7; i++) {
+      this.particles.push({
+        kind: 'crumb', x: at.x + this.r(-5, 5), y: at.y + this.r(-5, 5), vx: this.r(-1.8, 1.8), vy: this.r(-2.6, -0.4),
+        rot: this.r(0, 6), spin: this.r(-0.3, 0.3), size: this.r(2.5, 5),
+        colour: colours[Math.floor(this.rand() * colours.length)]!, age: 0, life: this.r(500, 850), gravity: 0.13, drag: 0.97,
+      });
+    }
+    this.particles.push({
+      kind: 'puff', x: at.x, y: at.y, vx: 0, vy: -0.3, rot: 0, spin: 0,
+      size: 9, colour: 0xf4a6b8, age: 0, life: 380, gravity: 0, drag: 0.95,
+    });
   }
 
   /** Paper-scrap confetti bursting up from a point. */
@@ -121,6 +137,21 @@ export class Effects {
           g.lineStyle(2.2, p.colour, 1 - k);
           g.lineBetween(p.x, p.y, p.x - p.vx * 1.6, p.y - p.vy * 1.6);
           break;
+        case 'crumb': {
+          const c = Math.cos(p.rot) * p.size;
+          const sn = Math.sin(p.rot) * p.size;
+          g.fillStyle(p.colour, k > 0.7 ? (1 - k) / 0.3 : 1);
+          g.fillPoints(
+            [
+              { x: p.x - c * 0.5 - sn * 0.35, y: p.y - sn * 0.5 + c * 0.35 },
+              { x: p.x + c * 0.5 - sn * 0.35, y: p.y + sn * 0.5 + c * 0.35 },
+              { x: p.x + c * 0.5 + sn * 0.35, y: p.y + sn * 0.5 - c * 0.35 },
+              { x: p.x - c * 0.5 + sn * 0.35, y: p.y - sn * 0.5 - c * 0.35 },
+            ],
+            true,
+          );
+          break;
+        }
         case 'confetti': {
           // Paper scraps flutter: their width flips as they spin.
           const w = p.size * Math.abs(Math.cos(p.rot * 2));

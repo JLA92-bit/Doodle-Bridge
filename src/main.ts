@@ -36,8 +36,11 @@ async function boot(): Promise<void> {
   // Hooks for automated browser tests: the game, and page coordinates to screen (CSS) coordinates.
   Object.assign(window, {
     __game: game,
-    __pageToClient: (x: number, y: number) => {
-      const cam = game.scene.getScenes(true)[0]?.cameras.main;
+    // `hud` converts a fixed HUD position (button, arrow) using the static UI camera of scenes that have one;
+    // world positions use the main camera, which scrolls over wide levels.
+    __pageToClient: (x: number, y: number, hud = false) => {
+      const cams = game.scene.getScenes(true)[0]?.cameras;
+      const cam = hud && cams ? cams.cameras[cams.cameras.length - 1] : cams?.main;
       const rect = game.canvas.getBoundingClientRect();
       if (!cam) return { x: 0, y: 0 };
       const k = rect.width / game.canvas.width;

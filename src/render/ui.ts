@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { COLOURS, FONT_TITLE, FONT_UI } from '../config/ui';
 import { GAME_HEIGHT, GAME_WIDTH } from '../config/world';
+import type { PaperStyle } from '../config/notebooks';
 import { addPaper } from './PaperBackground';
 import { boilImage, css, PENCIL, registerBoil, roughTextures, roundedRectPath, starPath, type Box } from './RoughRenderer';
 import { RENDER_SCALE, setupCamera } from './scale';
@@ -8,10 +9,10 @@ import { RENDER_SCALE, setupCamera } from './scale';
 const FADE_MS = 140;
 
 /** Camera, desk and page for a screen, with a quick fade in. */
-export function setupScreen(scene: Phaser.Scene, paper = true): void {
-  setupCamera(scene);
-  if (paper) addPaper(scene, GAME_WIDTH, GAME_HEIGHT);
-  scene.cameras.main.fadeIn(FADE_MS, 139, 107, 82);
+export function setupScreen(scene: Phaser.Scene, paper: boolean | PaperStyle = true, focusX?: () => number): void {
+  setupCamera(scene, focusX);
+  if (paper) addPaper(scene, GAME_WIDTH, GAME_HEIGHT, paper === true ? 'lined' : paper);
+  scene.cameras.cameras.forEach((c) => c.fadeIn(FADE_MS, 139, 107, 82));
 }
 
 /** Fades out, then starts another scene. */
@@ -19,7 +20,7 @@ export function goTo(scene: Phaser.Scene, key: string, data?: object): void {
   const cam = scene.cameras.main;
   if (scene.registry.get('navigating')) return;
   scene.registry.set('navigating', true);
-  cam.fadeOut(FADE_MS, 139, 107, 82);
+  scene.cameras.cameras.forEach((c) => c.fadeOut(FADE_MS, 139, 107, 82));
   cam.once('camerafadeoutcomplete', () => {
     scene.registry.set('navigating', false);
     scene.scene.start(key, data);
