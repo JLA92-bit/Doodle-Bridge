@@ -5,7 +5,7 @@ import { PENS, type PenConfig, type PenId } from '../config/pens';
 import { getVehicle, type VehicleId } from '../config/vehicles';
 import { anchorPoints, levelSize, terrainPolygons, type LevelData, type PlatformDef } from '../game/Level';
 import { BridgeChain, type AnchorHost } from './BridgeChain';
-import { updateBreaks } from './BreakSystem';
+import { updateBreaks, type Snap } from './BreakSystem';
 import { CAT } from './categories';
 import { toPoint, type Point } from './geometry';
 import { buildStroke, type BuiltStroke } from './StrokeBuilder';
@@ -49,6 +49,8 @@ export class Simulation {
   /** Steps on which boosts started, for replays. */
   readonly boosts: number[] = [];
   snaps = 0;
+  /** Joints that snapped during the last step (with their line), for close-call detection. */
+  lastSnaps: Snap[] = [];
   /** Moving platforms, one per `level.platforms` entry. */
   readonly platforms: PlatformState[] = [];
   /** True once the vehicle has passed the level's checkpoint during this run. */
@@ -82,20 +84,8 @@ export class Simulation {
       velocityIterations: PHYSICS.velocityIterations,
       constraintIterations: PHYSICS.constraintIterations,
     });
-    for (const poly of terrainPolygons(level)) {
-      const verts = Vertices.clockwiseSort(poly.map((p) => ({ ...p })));
-      const body = Body.create({
-        position: Vertices.centre(verts),
-        vertices: verts,
-        isStatic: true,
-        friction: 0.9,
-        label: 'terrain',
-        collisionFilter: { category: CAT.terrain, mask: CAT.stroke | CAT.vehicle },
-      });
-      this.terrain.push(body);
-    }
-    Composite.add(this.engine.world, this.terrain);
-    this.buildPlatforms();
+    for (const poly of terrainPolygons(level)) this.addTerrain(poly);
+    for (const def of level.platforms ?? []) this.addPlatform(def);
     this.checkpointReached = options.fromCheckpoint === true && level.checkpoint !== undefined;
     this.spawnVehicle();
     const markContacts = (e: Matter.IEventCollision<Matter.Engine>) => {
@@ -138,6 +128,51 @@ export class Simulation {
     this.strokes.push(chain);
     Composite.add(this.engine.world, chain.composite);
     return chain;
+  }
+
+  /** Adds a convex static terrain piece (also used to stream in endless chunks). */
+  addTerrain(poly: readonly Point[]): Matter.Body {
+    const verts = Vertices.clockwiseSort(poly.map((p) => ({ ...p })));
+    const body = Body.create({
+      position: Vertices.centre(verts),
+      vertices: verts,
+      isStatic: true,
+      friction: 0.9,
+      label: 'terrain',
+      collisionFilter: { category: CAT.terrain, mask: CAT.stroke | CAT.vehicle },
+    });
+    this.terrain.push(body);
+    Composite.add(this.engine.world, body);
+    return body;
+  }
+
+  removeTerrain(body: Matter.Body): void {
+    const i = this.terrain.indexOf(body);
+    if (i !== -1) this.terrain.splice(i, 1);
+    Composite.remove(this.engine.world, body);
+  }
+
+  /** Adds a nail; `host` is the platform body it rides on (null for the fixed world). */
+  addAnchor(at: Point, host: AnchorHost = null): void {
+    this.anchors.push(at);
+    this.anchorHosts.push(host);
+  }
+
+  /** Removes nails by identity. */
+  removeAnchors(points: readonly Point[]): void {
+    for (const p of points) {
+      const i = this.anchors.indexOf(p);
+      if (i === -1) continue;
+      this.anchors.splice(i, 1);
+      this.anchorHosts.splice(i, 1);
+    }
+  }
+
+  /** Removes a stroke from the world without touching the others. */
+  removeStroke(chain: BridgeChain): void {
+    const i = this.strokes.indexOf(chain);
+    if (i !== -1) this.strokes.splice(i, 1);
+    Composite.remove(this.engine.world, chain.composite, true);
   }
 
   undo(): void {
@@ -195,7 +230,8 @@ export class Simulation {
     Engine.update(this.engine, STEP_MS);
     this.steps++;
     this.applyErasers();
-    for (const snap of updateBreaks(this.strokes)) {
+    this.lastSnaps = updateBreaks(this.strokes);
+    for (const snap of this.lastSnaps) {
       this.snaps++;
       this.events.push({ type: 'snap', at: snap.at });
     }
@@ -242,7 +278,7 @@ export class Simulation {
       this.progressX = v.chassis.position.x;
       this.stalledSteps = 0;
     } else this.stalledSteps++;
-    if (this.stalledSteps >= stepsFor(CRASH.stallMs)) return this.crash('stalled');
+    if (this.stalledSteps >= stepsFor(this.options.stallMs ?? CRASH.stallMs)) return this.crash('stalled');
 
     if (this.level.timeLimitMs !== undefined && this.steps * STEP_MS > this.level.timeLimitMs) this.crash('timeout');
   }
@@ -254,32 +290,40 @@ export class Simulation {
     this.events.push({ type: 'checkpoint' });
   }
 
-  private buildPlatforms(): void {
-    for (const def of this.level.platforms ?? []) {
-      const verts = Vertices.clockwiseSort(def.points.map((p) => ({ ...toPoint(p) })));
-      const centre = Vertices.centre(verts);
-      const body = Body.create({
-        position: centre,
-        vertices: verts,
-        isStatic: true,
-        friction: PLATFORM.friction,
-        frictionStatic: PLATFORM.frictionStatic,
-        label: 'platform',
-        collisionFilter: { category: CAT.terrain, mask: CAT.stroke | CAT.vehicle },
-      });
-      const state: PlatformState = { body, def };
-      const base = { x: body.position.x, y: body.position.y };
-      platformBase.set(body, base);
-      this.platforms.push(state);
-      Body.setPosition(body, offsetPosition(base, def, 0));
-      Composite.add(this.engine.world, body);
-      // Nails on the platform snap strokes like world nails, but pin to the platform body.
-      const o = platformOffset(def, 0);
-      for (const n of def.nails ?? []) {
-        this.anchors.push({ x: n[0] + o.x, y: n[1] + o.y });
-        this.anchorHosts.push(body);
-      }
+  /** Adds a moving platform; its cycle starts now (`born`), so platforms added mid-run do not jump. */
+  addPlatform(def: PlatformDef): PlatformState {
+    const verts = Vertices.clockwiseSort(def.points.map((p) => ({ ...toPoint(p) })));
+    const centre = Vertices.centre(verts);
+    const body = Body.create({
+      position: centre,
+      vertices: verts,
+      isStatic: true,
+      friction: PLATFORM.friction,
+      frictionStatic: PLATFORM.frictionStatic,
+      label: 'platform',
+      collisionFilter: { category: CAT.terrain, mask: CAT.stroke | CAT.vehicle },
+    });
+    const state: PlatformState = { body, def, born: this.steps, nails: [] };
+    const base = { x: body.position.x, y: body.position.y };
+    platformBase.set(body, base);
+    this.platforms.push(state);
+    Body.setPosition(body, offsetPosition(base, def, 0));
+    Composite.add(this.engine.world, body);
+    // Nails on the platform snap strokes like world nails, but pin to the platform body.
+    const o = platformOffset(def, 0);
+    for (const n of def.nails ?? []) {
+      const at = { x: n[0] + o.x, y: n[1] + o.y };
+      state.nails.push({ at, rel: { x: at.x - body.position.x, y: at.y - body.position.y } });
+      this.addAnchor(at, body);
     }
+    return state;
+  }
+
+  removePlatform(state: PlatformState): void {
+    const i = this.platforms.indexOf(state);
+    if (i !== -1) this.platforms.splice(i, 1);
+    this.removeAnchors(state.nails.map((n) => n.at));
+    Composite.remove(this.engine.world, state.body);
   }
 
   /** Puts every platform where it belongs after `step` steps, giving it the velocity to carry riders. */
@@ -287,7 +331,13 @@ export class Simulation {
     // Matter supports a third argument (updateVelocity); the bundled types only list two.
     const setPosition = Body.setPosition as (b: Matter.Body, pos: Matter.Vector, updateVelocity?: boolean) => void;
     for (const p of this.platforms) {
-      setPosition(p.body, offsetPosition(platformBase.get(p.body)!, p.def, step * STEP_MS), true);
+      setPosition(p.body, offsetPosition(platformBase.get(p.body)!, p.def, (step - p.born) * STEP_MS), true);
+      // Endless: nails follow their platform so strokes drawn mid-run snap to where the nail is now.
+      if (!this.options.liveAnchors) continue;
+      for (const n of p.nails) {
+        n.at.x = p.body.position.x + n.rel.x;
+        n.at.y = p.body.position.y + n.rel.y;
+      }
     }
   }
 
@@ -355,12 +405,20 @@ export class Simulation {
 export interface SimOptions {
   /** Start at the level's checkpoint instead of the start (long levels, after passing it). */
   fromCheckpoint?: boolean;
+  /** Stall time (ms) before a no-progress crash; defaults to CRASH.stallMs. */
+  stallMs?: number;
+  /** Nails on moving platforms keep following them (endless, where strokes are drawn mid-run). */
+  liveAnchors?: boolean;
 }
 
 /** A moving platform at runtime. */
 export interface PlatformState {
   body: Matter.Body;
   def: PlatformDef;
+  /** Step on which its cycle began (0 for campaign platforms). */
+  born: number;
+  /** Its nails: current world position and offset from the platform body. */
+  nails: { at: Point; rel: Point }[];
 }
 
 /** Where each platform body sits at the start of its cycle's path (its centre before any offset). */

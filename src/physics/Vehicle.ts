@@ -14,6 +14,8 @@ export class Vehicle {
   /** Which wheels touched something during the last step (updated by the Simulation). */
   readonly wheelContacts: boolean[];
   motorOn = false;
+  /** Multiplier on the motor speed (endless mode speeds the vehicle up as the course gets harder). */
+  speedScale = 1;
 
   constructor(readonly config: VehicleConfig, start: Point) {
     const c = config;
@@ -72,7 +74,7 @@ export class Vehicle {
       return;
     }
     const c = this.config;
-    const target = c.motorSpeed * (boosting ? c.boostSpeed : 1);
+    const target = c.motorSpeed * this.speedScale * (boosting ? c.boostSpeed : 1);
     const grip = boosting ? Math.min(1, c.motorGrip * 2) : c.motorGrip;
     for (const w of this.wheels) {
       const av = w.angularVelocity;
