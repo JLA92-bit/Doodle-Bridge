@@ -28,6 +28,7 @@ const CRASH_TEXT: Record<CrashReason, string> = {
   fell: 'Down the gap!',
   flipped: 'Flipped over!',
   stalled: 'Stuck!',
+  timeout: 'Out of time!',
 };
 
 /** Hit-stop: the world freezes for a moment when the vehicle crashes. */

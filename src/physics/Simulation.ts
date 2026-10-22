@@ -2,7 +2,7 @@ import Matter from 'matter-js';
 import { BOOST, CRASH, PHYSICS, STEP_MS } from '../config/world';
 import { PENS, type PenConfig, type PenId } from '../config/pens';
 import { getVehicle, type VehicleId } from '../config/vehicles';
-import { anchorPoints, levelSize, terrainPolygons, type LevelData } from '../game/Level';
+import { anchorPoints, levelSize, terrainPolygons, type LevelData, type PlatformDef } from '../game/Level';
 import { BridgeChain } from './BridgeChain';
 import { updateBreaks } from './BreakSystem';
 import { CAT } from './categories';
@@ -13,12 +13,16 @@ import { Vehicle } from './Vehicle';
 const { Body, Composite, Engine, Events, Vertices } = Matter;
 
 export type SimStatus = 'drawing' | 'running' | 'won' | 'crashed';
-export type CrashReason = 'fell' | 'flipped' | 'stalled';
+export type CrashReason = 'fell' | 'flipped' | 'stalled' | 'timeout';
 
 export type SimEvent =
   | { type: 'snap'; at: Point }
   | { type: 'land'; impact: number }
   | { type: 'boost' }
+  /** Part of a line was rubbed out by an eraser zone. */
+  | { type: 'erase'; at: Point }
+  /** The vehicle passed the level's checkpoint. */
+  | { type: 'checkpoint' }
   | { type: 'won' }
   | { type: 'crashed'; reason: CrashReason; at: Point };
 
@@ -44,6 +48,10 @@ export class Simulation {
   /** Steps on which boosts started, for replays. */
   readonly boosts: number[] = [];
   snaps = 0;
+  /** Moving platforms (CONTRACT: filled in by the mechanics work). */
+  readonly platforms: PlatformState[] = [];
+  /** True once the vehicle has passed the level's checkpoint during this run. */
+  checkpointReached = false;
   private nextStrokeId = 0;
   private finishStep: number | null = null;
   private boostUntil = -1;
@@ -59,6 +67,7 @@ export class Simulation {
     readonly level: LevelData,
     penId: PenId = level.pen ?? 'pencil',
     readonly vehicleId: VehicleId = level.vehicle ?? 'paperCar',
+    readonly options: SimOptions = {},
   ) {
     this.pen = PENS[penId];
     this.inkTotal = Math.round(level.ink * this.pen.inkMultiplier);
@@ -187,6 +196,11 @@ export class Simulation {
     }
   }
 
+  /** Time left on a timed level (null when the level has no time limit). */
+  get timeLeftMs(): number | null {
+    return this.level.timeLimitMs === undefined ? null : Math.max(0, this.level.timeLimitMs - this.elapsedMs);
+  }
+
   get elapsedMs(): number {
     return (this.finishStep ?? this.steps) * STEP_MS;
   }
@@ -248,8 +262,19 @@ export class Simulation {
 }
 
 /** Rebuilds a fresh simulation with the same strokes, used by Retry. */
-export function rebuild(sim: Simulation): Simulation {
-  const next = new Simulation(sim.level, sim.pen.id, sim.vehicleId);
+export interface SimOptions {
+  /** Start at the level's checkpoint instead of the start (long levels, after passing it). */
+  fromCheckpoint?: boolean;
+}
+
+/** A moving platform at runtime. */
+export interface PlatformState {
+  body: Matter.Body;
+  def: PlatformDef;
+}
+
+export function rebuild(sim: Simulation, options: SimOptions = {}): Simulation {
+  const next = new Simulation(sim.level, sim.pen.id, sim.vehicleId, options);
   for (const s of sim.strokes) next.addBuilt(s.stroke);
   return next;
 }
