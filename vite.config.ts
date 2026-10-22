@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.ts', 'tests/*.test.ts'],
     environment: 'node',
+    // The transformed-module cache keeps old import.meta.glob results, so new level files
+    // would be silently skipped by the solver test. Always transform fresh.
+    fsModuleCache: false,
   },
 });
