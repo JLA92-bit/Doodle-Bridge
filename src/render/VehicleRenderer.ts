@@ -138,26 +138,15 @@ export class VehicleRenderer {
     this.wheels.forEach((w) => w.destroy());
     this.currentId = config.id;
 
-    const bodyKey = `vehicle-${config.id}`;
+    const keys = vehicleTextures(this.scene, config);
     const { x0, y0, x1, y1 } = art.box;
-    paintTexture(this.scene, bodyKey, x1 - x0, y1 - y0, (ctx) => {
-      ctx.translate(-x0, -y0);
-      art.draw(ctx, config);
-    });
     this.body = this.scene.add
-      .image(0, 0, bodyKey)
+      .image(0, 0, keys.body)
       .setOrigin(-x0 / (x1 - x0), -y0 / (y1 - y0))
       .setDepth(this.depth + (art.bodyOverWheels ? 3 : 1));
-
-    this.wheels = config.wheels.map((w) => {
-      const key = `wheel-${art.wheel}-${w.r}`;
-      const size = w.r * 2 + 4;
-      paintTexture(this.scene, key, size, size, (ctx) => {
-        ctx.translate(size / 2, size / 2);
-        drawWheelArt(ctx, art.wheel, w.r);
-      });
-      return this.scene.add.image(0, 0, key).setDepth(this.depth + 2).setScale(1 / ART_SCALE);
-    });
+    this.wheels = keys.wheels.map((key) =>
+      this.scene.add.image(0, 0, key).setDepth(this.depth + 2).setScale(1 / ART_SCALE),
+    );
     return art;
   }
 
@@ -381,6 +370,46 @@ export class VehicleRenderer {
     this.backG.destroy();
     this.frontG.destroy();
   }
+}
+
+/** Paints (once) and returns the texture keys for a vehicle's body and wheels. */
+export function vehicleTextures(scene: Phaser.Scene, config: VehicleConfig): { body: string; wheels: string[] } {
+  const art = VEHICLE_ART[config.id];
+  const body = `vehicle-${config.id}`;
+  const { x0, y0, x1, y1 } = art.box;
+  paintTexture(scene, body, x1 - x0, y1 - y0, (ctx) => {
+    ctx.translate(-x0, -y0);
+    art.draw(ctx, config);
+  });
+  const wheels = config.wheels.map((w) => {
+    const key = `wheel-${art.wheel}-${w.r}`;
+    const size = w.r * 2 + 4;
+    paintTexture(scene, key, size, size, (ctx) => {
+      ctx.translate(size / 2, size / 2);
+      drawWheelArt(ctx, art.wheel, w.r);
+    });
+    return key;
+  });
+  return { body, wheels };
+}
+
+/** A still picture of a vehicle (title screen, garage), centred on its chassis at (x, y). */
+export function addVehiclePicture(
+  scene: Phaser.Scene,
+  config: VehicleConfig,
+  x: number,
+  y: number,
+  scale = 1,
+): Phaser.GameObjects.Container {
+  const art = VEHICLE_ART[config.id];
+  const keys = vehicleTextures(scene, config);
+  const { x0, y0, x1, y1 } = art.box;
+  const body = scene.add.image(0, 0, keys.body).setOrigin(-x0 / (x1 - x0), -y0 / (y1 - y0)).setScale(1 / ART_SCALE);
+  const wheels = keys.wheels.map((k, i) =>
+    scene.add.image(config.wheels[i]!.x, config.wheels[i]!.y, k).setScale(1 / ART_SCALE),
+  );
+  const parts = art.bodyOverWheels ? [...wheels, body] : [body, ...wheels];
+  return scene.add.container(x, y, parts).setScale(scale);
 }
 
 /** A rounded, outlined bar between two points (limbs, struts). */

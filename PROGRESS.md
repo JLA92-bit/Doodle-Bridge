@@ -6,7 +6,7 @@
 - [x] Vehicle art pass (requested after phase 2): all 6 vehicles drawn and driveable, then restyled to polished cartoon, see below
 - [x] 3. Breaking + game feel - stress tint, snapping, debris, crash/win rules, hit-stop, shake, sounds, confetti, stars, boost *(awaiting feel review)*
 - [x] 4. Rough art pass - roughjs terrain, flag, nails, buttons, ink bar, stars and pause panel with 12 fps boil; pencil-textured lines; page on a desk filling any screen; pause button and run timer *(awaiting look review)*
-- [ ] 5. Campaign framework
+- [x] 5. Campaign framework - level registry, save + unlock rules, title, notebook select, level select, results panel, pause Levels, dev level editor, solver test, level-stats script *(awaiting review)*
 - [ ] 6. Content: 60 levels
 - [ ] 7. Endless + daily
 - [ ] 8. Unlocks + garage
@@ -16,8 +16,8 @@
 ## Acceptance criteria
 Automated
 - [ ] Unit tests: scoring, combo, star rules, unlock rules, seeded generation (seeded RNG, star rules, level score, break/crash/boost rules done)
-- [ ] Solver test beats all 60 levels (runs on the test level today)
-- [x] Playwright smoke at 390 x 844: game loads, a stroke is drawn, run reaches the flag (title and results screens to come)
+- [ ] Solver test beats all 60 levels (3 of 60 authored so far, all pass)
+- [x] Playwright smoke at 390 x 844: title loads, a level starts, a stroke can be drawn, results screen appears (and progress saves)
 - [ ] Bundle under 3 MB (now ~1.4 MB raw, ~370 KB gzip); Lighthouse PWA + performance 90+
 - [ ] Edge function rejects impossible score, accepts valid one
 - [ ] Plays offline
@@ -83,6 +83,21 @@ Feel (Josh, on phone)
     running) bottom left, Go/Boost bottom right. Pause offers Resume and Restart (Levels comes with phase 5).
   - Browser tests run at 1x pixel density to keep the software renderer fast; `window.__pageToClient` converts page
     coordinates to screen coordinates for tests.
+
+- Phase 5 decisions:
+  - Levels live in `src/levels/nbN-MM.json` and are picked up automatically. The id must match notebook and index
+    (checked by the solver test). Levels gained an optional one-line `tip` shown before the first stroke.
+  - Unlocks: notebooks open by total stars (10, 25, 45, 70, 100). Inside a notebook, levels open one after another;
+    the optional challenge levels 8 and 9 can be skipped because the boss (10) opens once level 7 is done.
+  - Stars are kept once earned (best of each), along with best score, best time and least ink. Failed attempts are
+    saved too, so the hint ghost line still appears after 3 fails if you leave and come back.
+  - Results are a panel over the level (stars, ink and time against targets, score, best or "New best!") with
+    Retry, Levels and Next, so retrying stays instant. Next pulses when the next level is open.
+  - Levels not written yet show as dashed "soon" bubbles. Daily challenge shows a "coming soon" card until phase 7.
+  - Saves use localStorage, falling back to memory when storage is blocked (private browsing).
+  - Dev tools: `?editor=1` opens the level editor (ground blocks, ramps, nails, start, flag, solution stroke, test
+    in the real game, export JSON; `&level=nb1-02` edits an existing level). `?play=nb1-02` jumps into a level.
+    `npx tsx scripts/level-stats.ts` plays every solution and suggests star targets.
 
 ## Known gaps to revisit
 - Frame rate in the sandbox's software-rendered test browser is low (about 10 fps at 2x); this does not reflect phones.

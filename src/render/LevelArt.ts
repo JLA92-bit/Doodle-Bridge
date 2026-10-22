@@ -27,7 +27,8 @@ export function addLevelArt(scene: Phaser.Scene, level: LevelData): Phaser.GameO
     [poleX + 40, groundY],
   ];
   const box = boundsOf(all);
-  const keys = roughTextures(scene, `level-${level.id}`, box, (rc, ctx, seed) => {
+  // Key by content, so an edited level (editor test runs) never reuses stale art.
+  const keys = roughTextures(scene, `level-${level.id}-${hash(JSON.stringify([level.terrain, level.flag]))}`, box, (rc, ctx, seed) => {
     for (const t of level.terrain) {
       // Solid paper-grey underlay, then pencil hatching and a sketchy outline.
       ctx.beginPath();
@@ -85,4 +86,10 @@ export function addScribbleUnderline(scene: Phaser.Scene, cx: number, y: number,
     );
   });
   return boilImage(scene, keys, box).setDepth(10);
+}
+
+function hash(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(36);
 }

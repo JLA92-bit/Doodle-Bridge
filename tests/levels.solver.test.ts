@@ -37,7 +37,7 @@ describe('level solver', () => {
 });
 
 describe('every vehicle', () => {
-  const level = Object.values(levels).find((l) => l.id === 'test-01')!;
+  const level = Object.values(levels).find((l) => l.id === 'nb1-01')!;
   for (const id of Object.keys(VEHICLES) as VehicleId[]) {
     it(`${id} crosses the test bridge and falls without one`, () => {
       const run2 = (strokes: [number, number][][]) => {

@@ -32,9 +32,11 @@ export function roughTextures(
   box: Box,
   draw: (rc: RoughCanvas, ctx: CanvasRenderingContext2D, seed: number) => void,
   pad = 6,
+  /** Large, still backgrounds use 1 frame to save memory. */
+  frames = BOIL_FRAMES,
 ): string[] {
   const keys: string[] = [];
-  for (let f = 0; f < BOIL_FRAMES; f++) {
+  for (let f = 0; f < frames; f++) {
     const k = `${key}#${f}`;
     keys.push(k);
     if (scene.textures.exists(k)) continue;

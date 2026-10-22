@@ -22,6 +22,8 @@ export interface LevelData {
   /** Ink allowance in px of stroke length (before the pen multiplier). */
   ink: number;
   stars: { ink: number; timeMs: number };
+  /** One short line shown before the first try (no tutorial walls). */
+  tip?: string;
   vehicle?: VehicleId;
   pen?: PenId;
   hint?: PointTuple[][];
@@ -50,5 +52,8 @@ export function validateLevel(level: LevelData): string[] {
     if (!isConvex(t.points.map(toPoint))) errors.push(`terrain[${i}] is not convex`);
   });
   if (!level.solution?.strokes?.length) errors.push('missing solution stroke');
+  if (level.notebook >= 1 && level.id !== `nb${level.notebook}-${String(level.index).padStart(2, '0')}`) {
+    errors.push('id does not match notebook and index');
+  }
   return errors;
 }

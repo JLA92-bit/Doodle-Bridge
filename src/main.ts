@@ -2,7 +2,11 @@ import Phaser from 'phaser';
 import { DESK, GAME_HEIGHT, GAME_WIDTH } from './config/world';
 import { RENDER_SCALE } from './render/scale';
 import { BootScene } from './scenes/BootScene';
+import { EditorScene } from './scenes/EditorScene';
 import { GameScene } from './scenes/GameScene';
+import { LevelSelectScene } from './scenes/LevelSelectScene';
+import { NotebookSelectScene } from './scenes/NotebookSelectScene';
+import { TitleScene } from './scenes/TitleScene';
 
 async function loadFonts(): Promise<void> {
   try {
@@ -27,7 +31,7 @@ async function boot(): Promise<void> {
     scale: { mode: Phaser.Scale.EXPAND, autoCenter: Phaser.Scale.CENTER_BOTH },
     render: { antialias: true, roundPixels: false },
     input: { activePointers: 2 },
-    scene: [BootScene, GameScene],
+    scene: [BootScene, TitleScene, NotebookSelectScene, LevelSelectScene, GameScene, EditorScene],
   });
   // Hooks for automated browser tests: the game, and page coordinates to screen (CSS) coordinates.
   Object.assign(window, {

@@ -26,3 +26,5 @@ Read PLAN.md (the design source of truth) and PROGRESS.md (where we are) at the 
 - `src/config` tuning numbers - `src/physics` StrokeBuilder, BridgeChain, Vehicle, Simulation
 - `src/render` paper, buttons, scale - `src/scenes` Phaser scenes - `src/game` level, scoring, save
 - `src/endless` seeded generation - `src/net` leaderboard - `supabase/` backend
+- Scenes: Boot -> Title -> NotebookSelect -> LevelSelect -> Game; Editor (dev, `?editor=1`). `?play=nbN-MM` jumps into a level.
+- Level authoring: write JSON in `src/levels`, run `npx tsx scripts/level-stats.ts` for star targets, then `npm test`.

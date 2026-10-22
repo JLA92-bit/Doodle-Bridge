@@ -6,8 +6,10 @@ import { isVehicleId } from '../config/vehicles';
 import { GAME_HEIGHT, GAME_WIDTH, MAX_STEPS_PER_FRAME, PHYSICS, STEP_MS } from '../config/world';
 import type { LevelData } from '../game/Level';
 import { buzz } from '../game/Settings';
-import { rateRun } from '../game/StarRules';
-import testLevel from '../levels/test-01.json';
+import { getLevel, LEVELS, nextLevel } from '../game/Levels';
+import { levelUnlocked } from '../game/Progress';
+import { save } from '../game/Save';
+import { levelScore, rateRun } from '../game/StarRules';
 import { maxStress } from '../physics/BreakSystem';
 import { polylineLength, toPoint, type Point } from '../physics/geometry';
 import { rebuild, Simulation, type CrashReason, type SimEvent } from '../physics/Simulation';
@@ -16,8 +18,9 @@ import { Button } from '../render/Button';
 import { Effects } from '../render/Effects';
 import { addLevelArt, addNails, addScribbleUnderline } from '../render/LevelArt';
 import { addPaper } from '../render/PaperBackground';
-import { RENDER_SCALE, setupCamera } from '../render/scale';
-import { boilFrame, boilImage, css, PENCIL, registerBoil, roughTextures, roundedRectPath, starPath } from '../render/RoughRenderer';
+import { RENDER_SCALE } from '../render/scale';
+import { addPanel, addStar, goTo, setupScreen } from '../render/ui';
+import { boilFrame, boilImage, css, PENCIL, roughTextures, roundedRectPath } from '../render/RoughRenderer';
 import { mulberry32 } from '../endless/SeededRandom';
 import { VehicleRenderer } from '../render/VehicleRenderer';
 
@@ -51,12 +54,14 @@ export class GameScene extends Phaser.Scene {
   private inkText!: Phaser.GameObjects.Text;
   private message!: Phaser.GameObjects.Text;
   private subMessage!: Phaser.GameObjects.Text;
-  private details!: Phaser.GameObjects.Text;
-  private stars: Phaser.GameObjects.Image[] = [];
+  /** Everything in the results panel, removed on retry. */
+  private results: Phaser.GameObjects.GameObject[] = [];
   private timerText!: Phaser.GameObjects.Text;
   private pauseBtn!: Button;
   private pauseLayer!: Phaser.GameObjects.Container;
   private paused = false;
+  /** Test run from the level editor: nothing is saved and Levels returns to the editor. */
+  private fromEditor = false;
   private undoBtn!: Button;
   private clearBtn!: Button;
   private goBtn!: Button;
@@ -68,14 +73,21 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  create(): void {
-    setupCamera(this);
-    this.level = testLevel as LevelData;
+  create(data: { levelId?: string; level?: LevelData; fromEditor?: boolean } = {}): void {
+    setupScreen(this, false);
+    this.level = data.level ?? getLevel(data.levelId ?? '') ?? LEVELS[0]!;
+    this.fromEditor = !!data.fromEditor;
+    this.paused = false;
+    this.pendingCrash = null;
+    this.hitStopUntil = 0;
+    this.raw = null;
+    this.drawPointerId = null;
+    this.results = [];
     // Dev preview until the garage exists: ?vehicle=monsterTruck
     const vehicleParam = new URLSearchParams(window.location.search).get('vehicle');
     this.sim = new Simulation(this.level, undefined, isVehicleId(vehicleParam) ? vehicleParam : undefined);
     this.accumulator = 0;
-    this.fails = 0;
+    this.fails = this.fromEditor ? 0 : save().record(this.level.id).fails;
 
     addPaper(this, GAME_WIDTH, GAME_HEIGHT);
     addLevelArt(this, this.level);
@@ -100,7 +112,6 @@ export class GameScene extends Phaser.Scene {
       .setResolution(RENDER_SCALE)
       .setDepth(20);
     this.subMessage = this.text(GAME_WIDTH / 2, 296, '', 24).setDepth(20);
-    this.details = this.text(GAME_WIDTH / 2, 400, '', 21).setDepth(20).setAlign('center').setLineSpacing(4);
 
     const by = GAME_HEIGHT - HUD.margin - HUD.buttonH / 2;
     this.undoBtn = new Button(this, HUD.margin + 50, by, 'Undo', () => this.undo()).setDepth(30);
@@ -150,7 +161,7 @@ export class GameScene extends Phaser.Scene {
   private buildPauseLayer(): Phaser.GameObjects.Container {
     const dim = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH + 4000, GAME_HEIGHT + 4000, 0x2a2420, 0.35);
     dim.setInteractive();
-    const panel = { x: GAME_WIDTH / 2 - 150, y: 250, w: 300, h: 250 };
+    const panel = { x: GAME_WIDTH / 2 - 150, y: 250, w: 300, h: 320 };
     const keys = roughTextures(this, 'pause-panel', panel, (rc, ctx, seed) => {
       const outline = roundedRectPath(panel.x, panel.y, panel.w, panel.h, 18);
       ctx.fillStyle = css(0xfbf7ea);
@@ -170,7 +181,8 @@ export class GameScene extends Phaser.Scene {
       this.setPaused(false);
       this.retry();
     }, { width: 180 });
-    return this.add.container(0, 0, [dim, img, title, resume, restart]).setDepth(50).setVisible(false);
+    const levels = new Button(this, GAME_WIDTH / 2, 516, 'Levels', () => this.toLevels(), { width: 180 });
+    return this.add.container(0, 0, [dim, img, title, resume, restart, levels]).setDepth(50).setVisible(false);
   }
 
   private setPaused(on: boolean): void {
@@ -301,7 +313,7 @@ export class GameScene extends Phaser.Scene {
     this.goBtn.setVisible(!running).setLabel(drawing ? 'Go!' : 'Retry');
     if (drawing) {
       this.message.setText('');
-      this.subMessage.setText(this.sim.strokes.length === 0 ? 'Draw a bridge from nail to nail' : '');
+      this.subMessage.setText(this.sim.strokes.length === 0 ? (this.level.tip ?? '') : '');
     } else if (running) {
       this.subMessage.setText('');
     }
@@ -381,8 +393,14 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- results ----------
 
+  private toLevels(): void {
+    Sfx.quiet();
+    if (this.fromEditor) goTo(this, 'Editor', { level: this.level });
+    else goTo(this, 'LevelSelect', { notebook: this.level.notebook });
+  }
+
   private showCrash(e: Extract<SimEvent, { type: 'crashed' }>): void {
-    this.fails++;
+    this.fails = this.fromEditor ? this.fails + 1 : save().recordFail(this.level.id);
     const at = { x: e.at.x, y: Math.min(e.at.y, GAME_HEIGHT - 20) };
     this.car.explode(this.sim.vehicle);
     this.fx.crashBurst(at);
@@ -400,55 +418,81 @@ export class GameScene extends Phaser.Scene {
     this.fx.confetti({ x: f.x + f.w / 2, y: f.y + f.h - 60 });
     this.fx.confetti({ x: GAME_WIDTH / 2, y: 120 }, 40);
     Sfx.win();
-    this.refreshUi();
-    this.popText(this.message.setText('Nice!').setColor('#2f8f4e'), 4);
 
-    const rating = rateRun(
-      { won: true, inkUsed: this.sim.inkUsed, inkTotal: this.sim.inkTotal, timeMs: this.sim.elapsedMs },
-      this.level.stars,
-    );
-    const earned = [rating.complete, rating.ink, rating.time];
-    const starKeys = (on: boolean) =>
-      roughTextures(this, on ? 'star-on' : 'star-off', { x: -30, y: -30, w: 60, h: 60 }, (rc, ctx, seed) => {
-        const pts = starPath(0, 0, 28);
-        ctx.beginPath();
-        pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-        ctx.closePath();
-        ctx.fillStyle = on ? css(COLOURS.star) : 'rgba(255,255,255,0.7)';
-        ctx.fill();
-        rc.polygon(pts, {
-          ...PENCIL,
-          stroke: on ? '#3d3d44' : '#8a8790',
-          strokeWidth: 2.6,
-          fill: on ? 'rgba(214,150,20,0.8)' : undefined,
-          fillStyle: 'hachure',
-          hachureGap: 4,
-          seed,
-        });
-      });
-    earned.forEach((on, i) => {
-      const keys = starKeys(on);
-      const img = this.add
-        .image(GAME_WIDTH / 2 + (i - 1) * 70, 330, keys[0]!)
-        .setDepth(21)
-        .setScale(0);
-      registerBoil(this, img, keys);
-      this.stars.push(img);
+    const run = { won: true, inkUsed: this.sim.inkUsed, inkTotal: this.sim.inkTotal, timeMs: this.sim.elapsedMs };
+    const rating = rateRun(run, this.level.stars);
+    const score = levelScore(run, this.level.stars);
+    const store = save();
+    const result = {
+      stars: [rating.complete, rating.ink, rating.time] as [boolean, boolean, boolean],
+      score,
+      timeMs: Math.round(run.timeMs),
+      ink: Math.round(run.inkUsed),
+    };
+    const outcome = this.fromEditor
+      ? { newBest: false, newStars: 0, firstClear: false }
+      : store.recordWin(this.level.id, result);
+    this.refreshUi();
+    this.goBtn.setVisible(false);
+
+    // Results panel slides up after a beat so the win moment can land.
+    const top = 150;
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.results.push(o);
+      return o;
+    };
+    add(addPanel(this, { x: 45, y: top, w: 390, h: 470 }, 0xfffdf6).setDepth(19));
+    const title = add(this.add
+      .text(GAME_WIDTH / 2, top + 60, 'Nice!', { fontFamily: FONT_TITLE, fontSize: '56px', color: '#2f8f4e' })
+      .setOrigin(0.5)
+      .setResolution(RENDER_SCALE)
+      .setDepth(21));
+    this.popText(title, 4);
+
+    const stars: Phaser.GameObjects.GameObject[] = [];
+    [rating.complete, rating.ink, rating.time].forEach((on, i) => {
+      const img = add(addStar(this, GAME_WIDTH / 2 + (i - 1) * 74, top + 150, on, 30).setDepth(21));
+      img.setScale(0);
+      stars.push(img);
       this.time.delayedCall(450 + i * 300, () => {
         this.tweens.add({ targets: img, scale: 1 / RENDER_SCALE, angle: on ? 360 : 0, duration: 380, ease: 'Back.easeOut' });
         if (on) Sfx.ding(i);
         else Sfx.tap();
       });
     });
-    const time = (this.sim.elapsedMs / 1000).toFixed(1);
+
+    const time = (run.timeMs / 1000).toFixed(1);
     const target = (this.level.stars.timeMs / 1000).toFixed(1);
-    this.details.setText(
-      `Ink ${Math.round(this.sim.inkUsed)}  (star at ${this.level.stars.ink})\n` +
-        `Time ${time} s  (star at ${target} s)`,
+    const lines = add(this.text(GAME_WIDTH / 2, top + 238, '', 21).setDepth(21).setAlign('center').setLineSpacing(4));
+    lines.setText(
+      `Ink ${Math.round(run.inkUsed)}  (star at ${this.level.stars.ink})\n` + `Time ${time} s  (star at ${target} s)`,
     );
-    this.details.setAlpha(0);
-    this.tweens.add({ targets: this.details, alpha: 1, delay: 1300, duration: 300 });
-    this.pulseRetry(1500);
+    const best = store.record(this.level.id).bestScore;
+    add(this.text(GAME_WIDTH / 2, top + 300, `Score ${fmt(score)}`, 30).setDepth(21));
+    add(
+      this.text(GAME_WIDTH / 2, top + 336, outcome.newBest ? 'New best!' : `Best ${fmt(best)}`, 22)
+        .setColor(outcome.newBest ? '#d8433b' : '#6b6b72')
+        .setDepth(21),
+    );
+
+    const by = top + 410;
+    const next = nextLevel(this.level);
+    const canNext = !this.fromEditor && !!next && levelUnlocked(store, next.notebook, next.index);
+    add(new Button(this, GAME_WIDTH / 2 - 120, by, 'Retry', () => this.retry(), { width: 100 }).setDepth(22));
+    add(new Button(this, GAME_WIDTH / 2, by, this.fromEditor ? 'Editor' : 'Levels', () => this.toLevels(), { width: 100 }).setDepth(22));
+    const nextBtn = add(
+      new Button(this, GAME_WIDTH / 2 + 120, by, 'Next', () => goTo(this, 'Game', { levelId: next!.id }), {
+        width: 100,
+        fill: 0xfff1a8,
+      }).setDepth(22),
+    );
+    nextBtn.setEnabled(canNext);
+
+    // Fade the panel in; the title and stars pop in on their own.
+    const fading = this.results.filter((o) => o !== title && !stars.includes(o)) as unknown as Phaser.GameObjects.Components.Alpha[];
+    fading.forEach((o) => o.setAlpha(0));
+    this.tweens.add({ targets: fading, alpha: 1, duration: 250, delay: 150 });
+    if (canNext) this.tweens.add({ targets: nextBtn, scale: 1.08, duration: 420, yoyo: true, repeat: -1, delay: 1600 });
   }
 
   private popText(t: Phaser.GameObjects.Text, angle: number): void {
@@ -466,9 +510,8 @@ export class GameScene extends Phaser.Scene {
     this.pulse?.stop();
     this.pulse = null;
     this.goBtn.setScale(1);
-    this.stars.forEach((s) => s.destroy());
-    this.stars = [];
-    this.details.setText('');
+    this.results.forEach((o) => o.destroy());
+    this.results = [];
     this.message.setText('');
   }
 
@@ -570,6 +613,8 @@ function stressedLine(
     false,
   );
 }
+
+const fmt = (n: number) => n.toLocaleString('en-US');
 
 function mix(a: number, b: number, t: number): number {
   const ch = (c: number, s: number) => (c >> s) & 255;
